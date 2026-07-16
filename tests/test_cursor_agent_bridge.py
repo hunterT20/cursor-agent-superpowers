@@ -18,6 +18,9 @@ RUNNER = REPO_ROOT / "skills" / "cursor-agent-bridge" / "scripts" / "run_cursor_
 FAKE_CURSOR = REPO_ROOT / "tests" / "fixtures" / "fake_cursor_agent.py"
 FIXED_MODEL = "composer-2.5[fast=false]"
 
+sys.path.insert(0, str(RUNNER.parent))
+from run_cursor_agent import _extract_session_id  # noqa: E402
+
 
 class CursorAgentBridgeTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -264,6 +267,68 @@ class CursorAgentBridgeTests(unittest.TestCase):
         self.assertIsNone(record["head_before"])
         self.assertIsNone(record["head_after"])
         self.assertFalse(record["head_changed"])
+
+    def test_extract_session_id_from_whole_json_session_id_key(self) -> None:
+        payload = json.dumps(
+            {
+                "type": "result",
+                "subtype": "success",
+                "session_id": "e3ddc855-31a9-4ff0-8345-04df3c83291f",
+            }
+        )
+        self.assertEqual(
+            _extract_session_id(payload),
+            "e3ddc855-31a9-4ff0-8345-04df3c83291f",
+        )
+
+    def test_extract_session_id_from_json_lines_session_id_key(self) -> None:
+        stdout = "\n".join(
+            [
+                json.dumps({"type": "progress", "message": "working"}),
+                json.dumps(
+                    {
+                        "type": "result",
+                        "subtype": "success",
+                        "session_id": "line-session-789",
+                    }
+                ),
+            ]
+        )
+        self.assertEqual(_extract_session_id(stdout), "line-session-789")
+
+    def test_extract_session_id_prefers_session_id_over_chat_id(self) -> None:
+        payload = json.dumps(
+            {
+                "session_id": "preferred-session",
+                "chatId": "legacy-chat",
+            }
+        )
+        self.assertEqual(_extract_session_id(payload), "preferred-session")
+
+    def test_extract_session_id_accepts_session_id_camel_case(self) -> None:
+        payload = json.dumps({"sessionId": "camel-session-321"})
+        self.assertEqual(_extract_session_id(payload), "camel-session-321")
+
+    def test_extract_session_id_retains_chat_id_compatibility(self) -> None:
+        payload = json.dumps({"chatId": "legacy-chat-654"})
+        self.assertEqual(_extract_session_id(payload), "legacy-chat-654")
+
+    def test_extract_session_id_ignores_empty_values(self) -> None:
+        payload = json.dumps({"session_id": "", "chatId": "fallback-chat"})
+        self.assertEqual(_extract_session_id(payload), "fallback-chat")
+
+    def test_captures_real_cursor_session_id_from_json_output(self) -> None:
+        env = {
+            "FAKE_CURSOR_EXIT": "0",
+            "FAKE_CURSOR_WRITE_REPORT": "1",
+            "FAKE_CURSOR_MUTATE_HEAD": "0",
+            "FAKE_CURSOR_SESSION_ID": "e3ddc855-31a9-4ff0-8345-04df3c83291f",
+            "FAKE_CURSOR_SESSION_KEY": "session_id",
+        }
+        result = self._run_bridge(env=env)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        record = self._load_record()
+        self.assertEqual(record["session_id"], "e3ddc855-31a9-4ff0-8345-04df3c83291f")
 
     def test_captures_session_id_from_json_output(self) -> None:
         env = {

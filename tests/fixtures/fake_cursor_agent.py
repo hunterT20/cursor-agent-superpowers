@@ -69,6 +69,7 @@ def main() -> int:
     write_report = os.environ.get("FAKE_CURSOR_WRITE_REPORT", "1") == "1"
     mutate_head = os.environ.get("FAKE_CURSOR_MUTATE_HEAD", "0") == "1"
     session_id = os.environ.get("FAKE_CURSOR_SESSION_ID", "session-test-123")
+    session_key = os.environ.get("FAKE_CURSOR_SESSION_KEY", "chatId")
 
     prompt = sys.argv[-1] if len(sys.argv) > 1 else ""
     workspace = None
@@ -84,7 +85,7 @@ def main() -> int:
     if mutate_head and workspace is not None and (workspace / ".git").exists():
         _mutate_head(workspace)
 
-    payload = {"chatId": session_id}
+    payload = {session_key: session_id}
     if os.environ.get("FAKE_CURSOR_PRETTY_JSON", "0") == "1":
         print(json.dumps(payload, indent=2))
     else:

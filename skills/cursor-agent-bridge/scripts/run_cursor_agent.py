@@ -52,15 +52,23 @@ def _build_fixed_prompt(workspace: Path, task_brief: Path, report_file: Path) ->
     )
 
 
+def _session_id_from_payload(payload: dict) -> str | None:
+    for key in ("session_id", "sessionId", "chatId"):
+        value = payload.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
 def _extract_session_id(stdout_text: str) -> str | None:
     stripped = stdout_text.strip()
     if stripped:
         try:
             payload = json.loads(stripped)
             if isinstance(payload, dict):
-                chat_id = payload.get("chatId")
-                if isinstance(chat_id, str) and chat_id:
-                    return chat_id
+                session_id = _session_id_from_payload(payload)
+                if session_id is not None:
+                    return session_id
         except json.JSONDecodeError:
             pass
 
@@ -73,9 +81,9 @@ def _extract_session_id(stdout_text: str) -> str | None:
         except json.JSONDecodeError:
             continue
         if isinstance(payload, dict):
-            chat_id = payload.get("chatId")
-            if isinstance(chat_id, str) and chat_id:
-                return chat_id
+            session_id = _session_id_from_payload(payload)
+            if session_id is not None:
+                return session_id
     return None
 
 

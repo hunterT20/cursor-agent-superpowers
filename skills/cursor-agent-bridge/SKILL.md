@@ -69,7 +69,7 @@ The worker report must include status (`implemented`, `blocked`, or `failed`), c
 
 ## Session resume
 
-When a resumable Cursor session exists for the same task, pass `--resume-session`. The runner forwards it as `--resume SESSION_ID` on the Cursor command and records any `chatId` from JSON stdout (pretty-printed or JSON-lines).
+When a resumable Cursor session exists for the same task, pass `--resume-session`. The runner forwards it as `--resume SESSION_ID` on the Cursor command and records the first nonempty session identifier from JSON stdout (pretty-printed or JSON-lines), checking keys in order: `session_id`, `sessionId`, `chatId`.
 
 ## Pressure resistance
 
