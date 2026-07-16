@@ -68,59 +68,34 @@ Run the unittest suite for bridge and contract coverage. Run `quick_validate.py`
 
 ## Installation
 
-After validation passes, install the four sibling folders under `skills/` into your Codex skills directory. The default destination is `${CODEX_HOME:-$HOME/.codex}/skills`.
-
-This overlay references upstream `@superpowers` skills (for example `superpowers:brainstorming`, `superpowers:writing-plans`, and `superpowers:using-git-worktrees`). Keep those upstream skills installed and available; this repository does not replace them.
-
-Set `REPO_ROOT` below to the absolute path of your local clone, then run the block as-is:
+After validation passes, install all four overlay skills with the open agent skills CLI:
 
 ```bash
-REPO_ROOT="/absolute/path/to/cursor-agent-superpowers"
-cd "$REPO_ROOT"
-
-SKILLS_DIR="${CODEX_HOME:-$HOME/.codex}/skills"
-
-SKILL_NAMES=(
-  "using-cursor-superpowers"
-  "cursor-agent-bridge"
-  "executing-plans-with-cursor"
-  "reviewing-cursor-changes"
-)
-
-for name in "${SKILL_NAMES[@]}"; do
-  src="$REPO_ROOT/skills/$name"
-  if [[ ! -d "$src" ]]; then
-    echo "ERROR: missing source folder: $src" >&2
-    exit 1
-  fi
-done
-
-for name in "${SKILL_NAMES[@]}"; do
-  dest="$SKILLS_DIR/$name"
-  if [[ -e "$dest" ]]; then
-    echo "ERROR: destination already exists: $dest" >&2
-    echo "Back up or remove it intentionally, then rerun." >&2
-    exit 1
-  fi
-done
-
-mkdir -p "$SKILLS_DIR"
-
-for name in "${SKILL_NAMES[@]}"; do
-  cp -R "$REPO_ROOT/skills/$name" "$SKILLS_DIR/$name"
-done
-
-for name in "${SKILL_NAMES[@]}"; do
-  if [[ ! -f "$SKILLS_DIR/$name/SKILL.md" ]]; then
-    echo "ERROR: installed skill missing SKILL.md: $SKILLS_DIR/$name" >&2
-    exit 1
-  fi
-done
-
-echo "Installed overlay skills into $SKILLS_DIR"
+npx --yes skills@latest add hunterT20/cursor-agent-superpowers \
+  --global \
+  --agent codex \
+  --skill '*' \
+  --copy \
+  --yes
 ```
 
-If any destination skill folder already exists, the command stops instead of overwriting it. Handle an existing installation intentionally—for example, back up or remove the destination folder, then rerun the block.
+`npx skills` clones or discovers the repository and installs the four `SKILL.md` folders (`using-cursor-superpowers`, `cursor-agent-bridge`, `executing-plans-with-cursor`, and `reviewing-cursor-changes`). `--global` targets the user-level install, `--agent codex` targets Codex, `--skill '*'` selects all four skills, `--copy` copies files instead of symlinking, and the final `--yes` skips the interactive confirmation. Install all four together—the overlay workflow depends on the bridge, execution, review, and routing skills as a set.
+
+This overlay references upstream `@superpowers` skills (for example `superpowers:brainstorming`, `superpowers:writing-plans`, and `superpowers:using-git-worktrees`). Keep those upstream skills installed and available; this repository does not replace them. The `npx skills` command installs only this repository's four overlay skills, not the upstream `@superpowers` plugin.
+
+Verify the installation:
+
+```bash
+npx --yes skills@latest list --global --agent codex
+```
+
+To refresh installed skills after upstream changes, run `npx --yes skills@latest update -g`. To remove the overlay skills, run:
+
+```bash
+npx --yes skills@latest remove --global --agent codex \
+  --skill cursor-agent-bridge executing-plans-with-cursor reviewing-cursor-changes using-cursor-superpowers \
+  --yes
+```
 
 After installation, open a new Codex task or reload Codex if the skill list has not refreshed.
 
