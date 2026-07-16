@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cursor Agent Bridge"
+  short_description: "Run bounded Cursor implementation tasks safely"
+  default_prompt: "Use Cursor Agent to implement this bounded task and return verifiable evidence."

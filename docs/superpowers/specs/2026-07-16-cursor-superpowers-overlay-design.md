@@ -57,7 +57,7 @@ Reusable execution boundary around the Cursor CLI. It owns a deterministic scrip
 
 - Validates required commands, workspace, prompt file, and report path.
 - Records the pre-run git `HEAD` when git is available.
-- Calls `cursor-agent --print --trust --model 'composer-2.5[fast=false]' --workspace "$workspace_path"`.
+- After the controller verifies worktree isolation and bounded scope, calls `cursor-agent --print --force --trust --model 'composer-2.5[fast=false]' --workspace "$workspace_path"` so the headless worker can edit and run tests without an interactive approval deadlock.
 - Supplies task requirements by file path rather than embedding large artifacts in the command line.
 - Captures stdout, stderr, exit status, timing, and available Cursor session metadata.
 - Refuses to report success when the required report is missing or empty.
@@ -153,6 +153,7 @@ The prompt restriction is not treated as the only control. The workflow combines
 
 - Worktree isolation when available.
 - Explicit file and command scope in each task brief.
+- `--force` only inside the explicitly authorized, isolated task workspace; never during discovery, planning, review, verification, or branch completion.
 - Pre-run and post-run `HEAD` checks.
 - Captured execution logs and structured reports.
 - Controller inspection of the actual diff.

@@ -11,6 +11,7 @@
 ## Global Constraints
 
 - Use the exact Cursor model `composer-2.5[fast=false]` for implementation and fix invocations.
+- Use Cursor `--force` only after the controller verifies worktree isolation and bounded task scope, so headless implementation can edit and run tests without interactive approval deadlock.
 - Superpowers/Codex owns discovery, design, planning, review, verification, and branch completion.
 - Cursor may edit files and run tests only inside the selected task workspace and scope.
 - Cursor must not commit, amend, push, merge, rebase, reset, tag, or switch branches.
@@ -122,6 +123,7 @@ Use `argparse`, `json`, `pathlib`, `subprocess.run`, and timezone-aware UTC time
 command = [
     cursor_bin,
     "--print",
+    "--force",
     "--trust",
     "--output-format",
     "json",
@@ -135,7 +137,7 @@ if resume_session:
 command.append(fixed_prompt)
 ```
 
-The fixed prompt must contain only controller-authored instructions and absolute file paths. It must tell Cursor to read the task brief, work only in the workspace, write the required report, stop on ambiguity, and avoid all prohibited git operations. Remove any pre-existing report before invocation so stale evidence cannot pass. Always write stdout/stderr sidecar files and the JSON run record. Check post-run `HEAD` even when Cursor exits nonzero; changed `HEAD` takes precedence as exit `12`.
+The fixed prompt must contain only controller-authored instructions and absolute file paths. It must tell Cursor to read the task brief, work only in the workspace, write the required report, stop on ambiguity, and avoid all prohibited git operations. `--force` is permitted only because the controller has already verified worktree isolation and task scope. Remove any pre-existing report before invocation so stale evidence cannot pass. Always write stdout/stderr sidecar files and the JSON run record. Check post-run `HEAD` even when Cursor exits nonzero; changed `HEAD` takes precedence as exit `12`.
 
 - [ ] **Step 6: Write the bridge skill**
 
