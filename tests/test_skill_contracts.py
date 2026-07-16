@@ -595,5 +595,298 @@ class ExecutingPlansWithCursorContractTests(unittest.TestCase):
         self.assertNotRegex(self.body, r"\[TODO", msg="SKILL.md still contains TODO placeholders")
 
 
+REVIEWING_CURSOR_CHANGES = REPO_ROOT / "skills" / "reviewing-cursor-changes" / "SKILL.md"
+
+REVIEW_EXPECTED_NAME = "reviewing-cursor-changes"
+REVIEW_EXPECTED_DESCRIPTION = (
+    "Use after Cursor Agent implements or fixes a task and before the controller "
+    "marks that task complete, advances the plan, or performs final verification."
+)
+
+REVIEW_REQUIRED_BODY_SECTIONS = (
+    "required input",
+    "gate order",
+    "spec-compliance",
+    "code-quality",
+    "evidence validation",
+    "verdict contract",
+    "consolidated fix brief",
+    "re-review loop",
+    "red flag",
+)
+
+REVIEW_REQUIRED_INPUTS = (
+    "task brief",
+    "worker report",
+    "run record",
+    "head",
+    "diff",
+    "test evidence",
+)
+
+
+def load_review_skill() -> tuple[dict[str, str], str, str]:
+    text = REVIEWING_CURSOR_CHANGES.read_text(encoding="utf-8")
+    frontmatter, body = parse_frontmatter(text)
+    combined = f"{frontmatter.get('description', '')}\n{body}".lower()
+    return frontmatter, body, combined
+
+
+class ReviewingCursorChangesContractTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.frontmatter, cls.body, cls.combined = load_review_skill()
+
+    def test_skill_file_exists(self) -> None:
+        self.assertTrue(REVIEWING_CURSOR_CHANGES.is_file())
+
+    def test_frontmatter_has_only_name_and_description(self) -> None:
+        self.assertEqual(set(self.frontmatter.keys()), {"name", "description"})
+
+    def test_frontmatter_name(self) -> None:
+        self.assertEqual(self.frontmatter["name"], REVIEW_EXPECTED_NAME)
+
+    def test_description_starts_with_use_when(self) -> None:
+        self.assertTrue(self.frontmatter["description"].startswith("Use when") or self.frontmatter["description"].startswith("Use after"))
+
+    def test_frontmatter_description_exact(self) -> None:
+        self.assertEqual(self.frontmatter["description"], REVIEW_EXPECTED_DESCRIPTION)
+
+    def test_required_inputs_present(self) -> None:
+        for item in REVIEW_REQUIRED_INPUTS:
+            with self.subTest(item=item):
+                self.assertIn(item, self.combined)
+
+    def test_checks_head_before_other_approval_decisions(self) -> None:
+        head_first_patterns = (
+            r"head.*first",
+            r"first.*head",
+            r"before.*other.*approval.*head",
+            r"check.*head.*before",
+            r"gate.*head",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in head_first_patterns),
+            "Skill must check HEAD before any other approval decision",
+        )
+
+    def test_head_mutation_is_blocked(self) -> None:
+        self.assertIn("blocked", self.combined)
+        mutation_patterns = (
+            r"head.*mutat",
+            r"mutat.*head",
+            r"head.*chang",
+            r"head_changed",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in mutation_patterns),
+            "Skill must treat HEAD mutation as blocked",
+        )
+
+    def test_separate_spec_compliance_and_code_quality(self) -> None:
+        self.assertIn("spec-compliance", self.combined)
+        self.assertIn("code-quality", self.combined)
+        separate_patterns = (
+            r"separate.*spec",
+            r"spec.*separate",
+            r"two.*dimension",
+            r"spec-compliance.*code-quality",
+            r"code-quality.*spec-compliance",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in separate_patterns),
+            "Skill must separate spec-compliance and code-quality review",
+        )
+
+    def test_inspects_actual_diff_not_report_alone(self) -> None:
+        diff_patterns = (
+            r"actual diff",
+            r"task-scoped diff",
+            r"inspect.*diff",
+            r"never trust.*report",
+            r"not trust.*report",
+            r"do not trust.*report",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in diff_patterns),
+            "Skill must inspect actual diff and not trust the report alone",
+        )
+
+    def test_verifies_changed_file_scope(self) -> None:
+        scope_patterns = (
+            r"changed-file scope",
+            r"file scope",
+            r"out-of-scope",
+            r"out of scope",
+            r"allowed files",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in scope_patterns),
+            "Skill must verify changed-file scope against the brief",
+        )
+
+    def test_requires_test_command_exit_code_and_result(self) -> None:
+        self.assertIn("exit code", self.combined)
+        evidence_patterns = (
+            r"test evidence",
+            r"command.*exit code",
+            r"exit code.*result",
+            r"exact command",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in evidence_patterns),
+            "Skill must require test command, exit code, and result evidence",
+        )
+
+    def test_exact_verdict_contract(self) -> None:
+        for verdict in ("approved", "fix-required", "blocked"):
+            with self.subTest(verdict=verdict):
+                self.assertIn(verdict, self.combined)
+        deny_patterns = (
+            r"conditional.*approv",
+            r"approv.*with.*note",
+            r"approv.*có điều kiện",
+            r"with-notes",
+        )
+        self.assertFalse(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in deny_patterns),
+            "Skill must not allow conditional or with-notes approval",
+        )
+
+    def test_missing_evidence_cannot_be_approved(self) -> None:
+        patterns = (
+            r"missing evidence.*not.*approv",
+            r"not.*approv.*missing evidence",
+            r"missing evidence.*fix-required",
+            r"cannot.*approv.*missing",
+            r"unproven.*not.*approv",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in patterns),
+            "Skill must not approve missing evidence because runtime failure is unproven",
+        )
+
+    def test_out_of_scope_cannot_be_approved(self) -> None:
+        patterns = (
+            r"out-of-scope.*not.*approv",
+            r"out of scope.*not.*approv",
+            r"out-of-scope.*fix-required",
+            r"cannot.*approv.*out-of-scope",
+            r"scope.*not.*approv",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in patterns),
+            "Skill must not approve out-of-scope changes",
+        )
+
+    def test_consolidated_fix_brief_through_bridge(self) -> None:
+        self.assertIn("consolidated fix brief", self.combined)
+        self.assertIn("cursor-agent-bridge", self.combined)
+        bridge_patterns = (
+            r"consolidat.*fix brief.*cursor-agent-bridge",
+            r"cursor-agent-bridge.*consolidat",
+            r"fix brief.*bridge",
+            r"route.*cursor-agent-bridge",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in bridge_patterns),
+            "Skill must route consolidated fix brief through cursor-agent-bridge",
+        )
+
+    def test_requires_covering_tests_and_rereview(self) -> None:
+        patterns = (
+            r"covering test",
+            r"re-review",
+            r"re-review.*before.*approv",
+            r"review again",
+            r"rerun.*test.*review",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in patterns),
+            "Skill must require covering tests and re-review before approval",
+        )
+
+    def test_minor_findings_recorded_not_discarded(self) -> None:
+        minor_patterns = (
+            r"minor finding",
+            r"final whole-change review",
+            r"final review",
+            r"never.*discard",
+            r"not.*silently discard",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in minor_patterns),
+            "Skill must record minor findings for final whole-change review",
+        )
+
+    def test_controller_must_not_apply_fixes(self) -> None:
+        patterns = (
+            r"controller.*must not.*edit",
+            r"codex.*must not.*edit",
+            r"never.*apply.*fix",
+            r"must not.*implementation fix",
+            r"does not edit.*implementation",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in patterns),
+            "Skill must forbid Codex/controller from applying implementation fixes",
+        )
+
+    def test_no_advance_after_non_approved_verdict(self) -> None:
+        patterns = (
+            r"not.*advance.*fix-required",
+            r"not.*advance.*blocked",
+            r"no.*ledger.*fix-required",
+            r"no.*ledger.*blocked",
+            r"not.*mark.*complete.*fix-required",
+            r"not.*background smoke",
+            r"no.*advance.*non-approved",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in patterns),
+            "Skill must forbid advance, ledger completion, or background smoke after non-approved verdict",
+        )
+
+    def test_references_bridge_and_execution_skills(self) -> None:
+        self.assertIn("cursor-agent-bridge", self.combined)
+        self.assertIn("executing-plans-with-cursor", self.combined)
+        reference_patterns = (
+            r"reference",
+            r"read the",
+            r"do not copy",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in reference_patterns),
+            "Skill must reference bridge/execution skills without copying procedures",
+        )
+
+    def test_pressure_resistance_deadline_never_exception(self) -> None:
+        self.assertIn("deadline", self.combined)
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in NEVER_EXCEPTION_PATTERNS),
+            "Skill must state deadline pressure is never an exception",
+        )
+
+    def test_pressure_resistance_trust_report_never_exception(self) -> None:
+        trust_patterns = (
+            r"trust.*report",
+            r"never trust",
+            r"not trust.*report",
+            r"report alone",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in trust_patterns),
+            "Skill must resist trusting the worker report alone",
+        )
+
+    def test_required_body_sections_present(self) -> None:
+        for section in REVIEW_REQUIRED_BODY_SECTIONS:
+            with self.subTest(section=section):
+                self.assertIn(section, self.combined)
+
+    def test_no_todo_placeholders_remain(self) -> None:
+        self.assertNotRegex(self.body, r"\[TODO", msg="SKILL.md still contains TODO placeholders")
+
+
 if __name__ == "__main__":
     unittest.main()

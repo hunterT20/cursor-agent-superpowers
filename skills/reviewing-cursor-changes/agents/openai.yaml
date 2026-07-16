@@ -1,0 +1,4 @@
+interface:
+  display_name: "Reviewing Cursor Changes"
+  short_description: "Review Cursor diffs and evidence before proceeding"
+  default_prompt: "Review this Cursor task against its brief, diff, run record, and fresh test evidence."
