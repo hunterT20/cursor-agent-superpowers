@@ -1,0 +1,4 @@
+interface:
+  display_name: "Executing Plans with Cursor"
+  short_description: "Execute approved plans through Cursor task workers"
+  default_prompt: "Execute this approved plan sequentially through Cursor Agent with review after every task."

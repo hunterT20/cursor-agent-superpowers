@@ -244,5 +244,356 @@ class UsingCursorSuperpowersContractTests(unittest.TestCase):
         self.assertNotRegex(self.body, r"\[TODO", msg="SKILL.md still contains TODO placeholders")
 
 
+EXECUTING_PLANS_WITH_CURSOR = REPO_ROOT / "skills" / "executing-plans-with-cursor" / "SKILL.md"
+EXECUTION_CONTRACTS_REFERENCE = (
+    REPO_ROOT / "skills" / "executing-plans-with-cursor" / "references" / "execution-contracts.md"
+)
+
+EXECUTION_EXPECTED_NAME = "executing-plans-with-cursor"
+EXECUTION_EXPECTED_DESCRIPTION = (
+    "Use when an approved implementation plan must be executed task-by-task by "
+    "Cursor Agent inside one isolated project workspace."
+)
+
+EXECUTION_REQUIRED_BODY_SECTIONS = (
+    "prerequisite",
+    "sequential",
+    "session rule",
+    "red flag",
+)
+
+EXECUTION_COMBINED_BODY_SECTIONS = (
+    "artifact layout",
+    "task-brief",
+    "progress ledger",
+    "blocker",
+)
+
+TASK_BRIEF_SCHEMA_FIELDS = (
+    "task identifier",
+    "purpose",
+    "exact requirements",
+    "allowed workspace",
+    "file scope",
+    "test-first",
+    "acceptance criteria",
+    "verification command",
+    "prohibited git",
+    "report file path",
+    "report schema",
+    "blocker",
+)
+
+
+def load_execution_skill() -> tuple[dict[str, str], str, str, str, str]:
+    text = EXECUTING_PLANS_WITH_CURSOR.read_text(encoding="utf-8")
+    frontmatter, body = parse_frontmatter(text)
+    combined = f"{frontmatter.get('description', '')}\n{body}".lower()
+    reference = ""
+    if EXECUTION_CONTRACTS_REFERENCE.is_file():
+        reference = EXECUTION_CONTRACTS_REFERENCE.read_text(encoding="utf-8")
+    full_combined = f"{combined}\n{reference}".lower()
+    return frontmatter, body, combined, reference, full_combined
+
+
+class ExecutingPlansWithCursorContractTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.frontmatter, cls.body, cls.combined, cls.reference, cls.full_combined = (
+            load_execution_skill()
+        )
+
+    def test_skill_file_exists(self) -> None:
+        self.assertTrue(EXECUTING_PLANS_WITH_CURSOR.is_file())
+
+    def test_execution_contracts_reference_exists(self) -> None:
+        self.assertTrue(
+            EXECUTION_CONTRACTS_REFERENCE.is_file(),
+            "references/execution-contracts.md must exist for progressive disclosure",
+        )
+
+    def test_requires_reading_contracts_reference_before_first_dispatch(self) -> None:
+        patterns = (
+            r"references/execution-contracts\.md",
+            r"execution-contracts\.md",
+        )
+        read_before_patterns = (
+            r"read.*execution-contracts.*before.*first\s+dispatch",
+            r"read.*references/execution-contracts.*before.*dispatch",
+            r"before.*first\s+dispatch.*read.*execution-contracts",
+            r"must\s+read.*execution-contracts.*before",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in patterns),
+            "SKILL.md must name references/execution-contracts.md",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in read_before_patterns),
+            "SKILL.md must require reading execution-contracts before first dispatch",
+        )
+
+    def test_frontmatter_has_only_name_and_description(self) -> None:
+        self.assertEqual(set(self.frontmatter.keys()), {"name", "description"})
+
+    def test_frontmatter_name(self) -> None:
+        self.assertEqual(self.frontmatter["name"], EXECUTION_EXPECTED_NAME)
+
+    def test_description_starts_with_use_when(self) -> None:
+        self.assertTrue(self.frontmatter["description"].startswith("Use when"))
+
+    def test_frontmatter_description_exact(self) -> None:
+        self.assertEqual(self.frontmatter["description"], EXECUTION_EXPECTED_DESCRIPTION)
+
+    def test_requires_approved_plan_before_dispatch(self) -> None:
+        patterns = (
+            r"approved\s+(implementation\s+)?plan",
+            r"plan\s+must\s+be\s+approved",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in patterns),
+            "Skill must require an approved plan before dispatch",
+        )
+
+    def test_requires_isolated_worktree_before_dispatch(self) -> None:
+        patterns = (
+            r"isolated\s+worktree",
+            r"worktree\s+isolation",
+            r"isolated\s+workspace",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in patterns),
+            "Skill must require an isolated worktree before dispatch",
+        )
+
+    def test_artifact_root_is_cursor_execution(self) -> None:
+        self.assertIn(".superpowers/cursor-execution/", self.full_combined)
+
+    def test_progress_ledger_path(self) -> None:
+        self.assertIn("progress.md", self.full_combined)
+        ledger_patterns = (
+            r"progress\.md",
+            r"progress ledger",
+            r"durable ledger",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.full_combined, re.DOTALL) for pattern in ledger_patterns),
+            "Skill must define progress.md as the durable ledger",
+        )
+
+    def test_one_fresh_cursor_session_per_task(self) -> None:
+        patterns = (
+            r"one\s+fresh\s+cursor\s+session\s+per\s+task",
+            r"fresh\s+cursor\s+session.*per\s+task",
+            r"one\s+fresh\s+session\s+per\s+task",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in patterns),
+            "Skill must start one fresh Cursor session per task",
+        )
+
+    def test_resume_only_within_task_review_fix_loop(self) -> None:
+        patterns = (
+            r"resume.*review-fix",
+            r"resume.*same\s+task",
+            r"review-fix.*resume",
+            r"resume.*only.*task",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in patterns),
+            "Skill must allow resume only within the active task's review-fix loop",
+        )
+
+    def test_sequential_implementation_in_shared_worktree(self) -> None:
+        self.assertIn("sequential", self.combined)
+        shared_patterns = (
+            r"shared\s+worktree",
+            r"one\s+worktree",
+            r"same\s+worktree",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in shared_patterns),
+            "Skill must implement sequentially in a shared worktree",
+        )
+
+    def test_never_parallel_implementers(self) -> None:
+        deny_patterns = (
+            r"never\s+parallel",
+            r"no\s+parallel",
+            r"not\s+parallel",
+            r"never\s+dispatch\s+parallel",
+            r"never\s+fan-out",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in deny_patterns),
+            "Skill must forbid parallel Cursor implementers",
+        )
+        self.assertIn("parallel", self.combined)
+
+    def test_independent_tasks_still_sequential(self) -> None:
+        patterns = (
+            r"independent.*sequential",
+            r"sequential.*independent",
+            r"even\s+when.*independent",
+            r"independent.*never\s+parallel",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in patterns),
+            "Skill must keep independent tasks sequential, never parallel",
+        )
+
+    def test_task_brief_schema_fields_present(self) -> None:
+        for field in TASK_BRIEF_SCHEMA_FIELDS:
+            with self.subTest(field=field):
+                self.assertIn(field, self.full_combined)
+
+    def test_routes_through_cursor_agent_bridge(self) -> None:
+        self.assertIn("cursor-agent-bridge", self.combined)
+        bridge_patterns = (
+            r"run_cursor_agent\.py",
+            r"cursor-agent-bridge",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in bridge_patterns),
+            "Skill must dispatch through cursor-agent-bridge",
+        )
+
+    def test_never_direct_cursor_agent_cli(self) -> None:
+        patterns = (
+            r"never\s+call\s+`?cursor-agent`?",
+            r"not\s+call\s+`?cursor-agent`?",
+            r"never.*direct.*cursor-agent",
+            r"do not call\s+`?cursor-agent`?",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in patterns),
+            "Skill must forbid direct cursor-agent CLI invocation",
+        )
+
+    def test_requires_review_before_ledger_completion(self) -> None:
+        self.assertIn("reviewing-cursor-changes", self.combined)
+        review_patterns = (
+            r"reviewing-cursor-changes.*before.*ledger",
+            r"before.*ledger.*reviewing-cursor-changes",
+            r"reviewing-cursor-changes.*before.*complete",
+            r"before.*mark.*complete.*reviewing-cursor-changes",
+            r"reviewing-cursor-changes.*before.*next\s+task",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in review_patterns),
+            "Skill must require reviewing-cursor-changes before ledger completion or next task",
+        )
+
+    def test_worker_exit_zero_is_not_completion(self) -> None:
+        patterns = (
+            r"exit\s+`?0`?.*not.*complet",
+            r"exit\s+0.*not.*complet",
+            r"not.*proof.*complet",
+            r"not.*task.*complet",
+            r"success.*not.*complet",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in patterns),
+            "Skill must state worker exit 0 is not task completion",
+        )
+
+    def test_resume_from_ledger_and_git_state_not_memory(self) -> None:
+        self.assertIn("ledger", self.combined)
+        memory_patterns = (
+            r"not.*conversation\s+memory",
+            r"never.*conversation\s+memory",
+            r"conversation\s+memory\s+alone",
+        )
+        git_patterns = (
+            r"git\s+state",
+            r"verified\s+git",
+            r"head",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in memory_patterns),
+            "Skill must not resume from conversation memory alone",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in git_patterns),
+            "Skill must resume from verified git state",
+        )
+
+    def test_codex_must_not_edit_implementation(self) -> None:
+        patterns = (
+            r"codex.*must not.*edit",
+            r"controller.*must not.*edit",
+            r"never edit.*implementation",
+            r"must not edit.*implementation",
+            r"does not edit.*implementation",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in patterns),
+            "Skill must forbid Codex/controller implementation edits",
+        )
+
+    def test_required_body_sections_present(self) -> None:
+        for section in EXECUTION_REQUIRED_BODY_SECTIONS:
+            with self.subTest(section=section):
+                self.assertIn(section, self.combined)
+
+    def test_combined_reference_body_sections_present(self) -> None:
+        for section in EXECUTION_COMBINED_BODY_SECTIONS:
+            with self.subTest(section=section):
+                self.assertIn(section, self.full_combined)
+
+    def test_pressure_resistance_parallel_workers_never_exception(self) -> None:
+        parallel_patterns = (
+            r"parallel",
+            r"fan-out",
+            r"fan out",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in parallel_patterns),
+            "Skill must address parallel-worker pressure",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in NEVER_EXCEPTION_PATTERNS),
+            "Skill must state parallel pressure is never an exception",
+        )
+
+    def test_pressure_resistance_trust_success_message(self) -> None:
+        patterns = (
+            r"success\s+message",
+            r"trust.*success",
+            r"worker.*summary",
+            r"implemented.*not.*complet",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in patterns),
+            "Skill must reject trusting worker success messages as completion",
+        )
+
+    def test_pressure_resistance_skip_review(self) -> None:
+        skip_patterns = (
+            r"skip.*review",
+            r"never skip",
+            r"no skip",
+            r"before.*next\s+task.*review",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in skip_patterns),
+            "Skill must forbid skipping review before advancing",
+        )
+
+    def test_references_dependencies_not_copies(self) -> None:
+        reference_patterns = (
+            r"reference",
+            r"read the",
+            r"required sub-skill",
+            r"do not copy",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in reference_patterns),
+            "Skill must reference dependency skills instead of copying procedures",
+        )
+
+    def test_no_todo_placeholders_remain(self) -> None:
+        self.assertNotRegex(self.body, r"\[TODO", msg="SKILL.md still contains TODO placeholders")
+
+
 if __name__ == "__main__":
     unittest.main()
