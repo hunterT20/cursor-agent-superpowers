@@ -68,14 +68,61 @@ Run the unittest suite for bridge and contract coverage. Run `quick_validate.py`
 
 ## Installation
 
-After validation passes, copy the four sibling folders under `skills/` into your Codex skills directory:
+After validation passes, install the four sibling folders under `skills/` into your Codex skills directory. The default destination is `${CODEX_HOME:-$HOME/.codex}/skills`.
 
-- `using-cursor-superpowers`
-- `cursor-agent-bridge`
-- `executing-plans-with-cursor`
-- `reviewing-cursor-changes`
+This overlay references upstream `@superpowers` skills (for example `superpowers:brainstorming`, `superpowers:writing-plans`, and `superpowers:using-git-worktrees`). Keep those upstream skills installed and available; this repository does not replace them.
 
-Copy manually; do not silently overwrite or modify an existing installation.
+Set `REPO_ROOT` below to the absolute path of your local clone, then run the block as-is:
+
+```bash
+REPO_ROOT="/absolute/path/to/cursor-agent-superpowers"
+cd "$REPO_ROOT"
+
+SKILLS_DIR="${CODEX_HOME:-$HOME/.codex}/skills"
+
+SKILL_NAMES=(
+  "using-cursor-superpowers"
+  "cursor-agent-bridge"
+  "executing-plans-with-cursor"
+  "reviewing-cursor-changes"
+)
+
+for name in "${SKILL_NAMES[@]}"; do
+  src="$REPO_ROOT/skills/$name"
+  if [[ ! -d "$src" ]]; then
+    echo "ERROR: missing source folder: $src" >&2
+    exit 1
+  fi
+done
+
+for name in "${SKILL_NAMES[@]}"; do
+  dest="$SKILLS_DIR/$name"
+  if [[ -e "$dest" ]]; then
+    echo "ERROR: destination already exists: $dest" >&2
+    echo "Back up or remove it intentionally, then rerun." >&2
+    exit 1
+  fi
+done
+
+mkdir -p "$SKILLS_DIR"
+
+for name in "${SKILL_NAMES[@]}"; do
+  cp -R "$REPO_ROOT/skills/$name" "$SKILLS_DIR/$name"
+done
+
+for name in "${SKILL_NAMES[@]}"; do
+  if [[ ! -f "$SKILLS_DIR/$name/SKILL.md" ]]; then
+    echo "ERROR: installed skill missing SKILL.md: $SKILLS_DIR/$name" >&2
+    exit 1
+  fi
+done
+
+echo "Installed overlay skills into $SKILLS_DIR"
+```
+
+If any destination skill folder already exists, the command stops instead of overwriting it. Handle an existing installation intentionally—for example, back up or remove the destination folder, then rerun the block.
+
+After installation, open a new Codex task or reload Codex if the skill list has not refreshed.
 
 ## Branch workflow
 
