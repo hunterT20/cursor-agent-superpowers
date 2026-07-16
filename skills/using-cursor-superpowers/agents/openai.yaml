@@ -1,0 +1,4 @@
+interface:
+  display_name: "Using Cursor Superpowers"
+  short_description: "Route Superpowers plans to Cursor implementation"
+  default_prompt: "Plan and review with Superpowers, and delegate every implementation edit to Cursor Agent."
