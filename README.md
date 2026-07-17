@@ -21,17 +21,20 @@ Cursor must **not** commit, push, merge, rebase, reset, tag, or switch branches.
 
 ## End-to-end workflow
 
-1. Use upstream Superpowers skills for discovery, brainstorming, and planning until an implementation plan is approved.
-2. Create an isolated git worktree for the change (`superpowers:using-git-worktrees`).
-3. Load `executing-plans-with-cursor` and read `references/execution-contracts.md` before the first dispatch.
-4. For each plan task, in order:
+1. At task start, the controller checks whether upstream `superpowers:*` skills are available.
+   - If unavailable, use controller-native planning, review, verification, and branch completion. Missing upstream Superpowers is not a blocker.
+   - If available, ask once for the whole task whether to use upstream Superpowers. Do not route the task through upstream Superpowers workflows before the user confirms.
+2. Use upstream Superpowers skills for discovery, brainstorming, and planning when confirmed—or use controller-native planning when upstream is unavailable or declined—until an implementation plan is approved.
+3. Create an isolated git worktree for the change (`superpowers:using-git-worktrees` when confirmed, or controller-native worktree isolation when not).
+4. Load `executing-plans-with-cursor` and read `references/execution-contracts.md` before the first dispatch.
+5. For each plan task, in order:
    1. Write `task-<id>/brief.md` as a regular file on disk before invoking the bridge.
    2. Dispatch **one fresh Cursor session** through `cursor-agent-bridge`.
    3. Wait for the bridge run to finish.
    4. Run `reviewing-cursor-changes` on the run record, worker report, diff, test output, and `HEAD` invariants.
    5. If the verdict is `fix-required`, write one consolidated `review-brief.md` and re-dispatch through the bridge; resume only within that task's review-fix loop when resumable.
    6. Mark the task complete in `progress.md` only after review returns `approved`.
-5. After all tasks are approved, run controller-side verification (`superpowers:verification-before-completion`) and branch completion (`superpowers:finishing-a-development-branch`).
+6. After all tasks are approved, run controller-side verification (`superpowers:verification-before-completion` when confirmed, or controller-native verification when not) and branch completion (`superpowers:finishing-a-development-branch` when confirmed, or controller-native branch completion when not).
 
 Never dispatch parallel implementers. Never advance on a worker success message or bridge exit `0` alone.
 
@@ -81,7 +84,7 @@ npx --yes skills@latest add hunterT20/cursor-agent-superpowers \
 
 `npx skills` clones or discovers the repository and installs the four `SKILL.md` folders (`using-cursor-superpowers`, `cursor-agent-bridge`, `executing-plans-with-cursor`, and `reviewing-cursor-changes`). `--global` targets the user-level install, `--agent codex` targets Codex, `--skill '*'` selects all four skills, `--copy` copies files instead of symlinking, and the final `--yes` skips the interactive confirmation. Install all four together—the overlay workflow depends on the bridge, execution, review, and routing skills as a set.
 
-This overlay references upstream `@superpowers` skills (for example `superpowers:brainstorming`, `superpowers:writing-plans`, and `superpowers:using-git-worktrees`). Keep those upstream skills installed and available; this repository does not replace them. The `npx skills` command installs only this repository's four overlay skills, not the upstream `@superpowers` plugin.
+Upstream `@superpowers` skills (for example `superpowers:brainstorming`, `superpowers:writing-plans`, and `superpowers:using-git-worktrees`) are **optional**. The overlay works without them using controller-native planning, review, verification, and branch completion. When upstream Superpowers is available, the controller asks once per task whether to use it and does not route the task through upstream Superpowers workflows before confirmation. The `npx skills` command installs only this repository's four overlay skills, not the upstream `@superpowers` plugin.
 
 Verify the installation:
 

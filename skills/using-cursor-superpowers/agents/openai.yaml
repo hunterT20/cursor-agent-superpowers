@@ -1,4 +1,4 @@
 interface:
   display_name: "Using Cursor Superpowers"
-  short_description: "Route Superpowers plans to Cursor implementation"
-  default_prompt: "Plan and review with Superpowers, and delegate every implementation edit to Cursor Agent."
+  short_description: "Route plans to Cursor implementation with optional upstream Superpowers"
+  default_prompt: "Route this task through the Cursor Superpowers overlay. Upstream Superpowers is optional—use controller-native planning and review when it is unavailable or declined, ask once per task before routing through upstream workflows when available, and delegate every implementation edit to Cursor Agent."
