@@ -1,6 +1,6 @@
 ---
 name: using-cursor-superpowers
-description: Use when a user wants Superpowers to discover, design, plan, review, or verify work while Cursor Agent performs every implementation and review-fix edit.
+description: Use when a user wants a controller to plan, review, or verify work while Cursor Agent performs every implementation and review-fix edit. Upstream Superpowers is optional; when available, ask once per task before routing through upstream workflows.
 ---
 
 # Using Cursor Superpowers
@@ -12,6 +12,29 @@ The Codex or Superpowers controller owns discovery, design, planning, review, ve
 The controller must not edit implementation code or review-fix code during an active overlay workflow. Never implement yourself, patch review findings yourself, or skip review because the change seems small.
 
 One file, a trivial or simple task, a deadline, or the belief that the controller can do it faster are never exceptions. No skip review under pressure.
+
+## Task-start upstream routing
+
+At task start, check whether upstream Superpowers skills are available in the current runtime.
+
+### When upstream Superpowers is unavailable
+
+- Do not block the task. Missing upstream Superpowers is not a blocker.
+- Do not insist that upstream Superpowers must be installed.
+- Use controller-native planning, review, verification, worktree handling, and branch completion.
+- Continue routing every implementation edit and every review-fix edit through `executing-plans-with-cursor`, `reviewing-cursor-changes`, and `cursor-agent-bridge`.
+
+### When upstream Superpowers is available
+
+- Ask the user once for the whole task whether to use upstream Superpowers for discovery, planning, worktrees, verification, and branch completion.
+- Do not invoke or route the task through upstream task-specific Superpowers workflows before affirmative confirmation.
+- If the user confirms, load and follow the relevant upstream skills for that task (see workflow routing table).
+- If the user declines, use controller-native planning, review, verification, worktree handling, and branch completion for that task.
+- Honor the explicit user choice for the entire task unless the user changes it.
+
+### Both routes
+
+In both routes, Cursor Agent remains the only implementation and review-fix worker. Every implementation edit and every review-fix edit still routes through `executing-plans-with-cursor`, `reviewing-cursor-changes`, and `cursor-agent-bridge`.
 
 ## Workflow routing table
 
@@ -31,7 +54,9 @@ Every implementation edit and every review-fix edit routes through `executing-pl
 
 ## Controller-only actions
 
-- Load and follow upstream `superpowers:*` skills for discovery, planning, worktrees, verification, and branch finishing.
+- At task start, check upstream Superpowers availability and honor the once-per-task user choice before routing through upstream workflows.
+- Load and follow upstream `superpowers:*` skills for discovery, planning, worktrees, verification, and branch finishing only after the user confirms.
+- Otherwise use controller-native planning, review, verification, worktree handling, and branch completion.
 - Write task briefs, review briefs, scope decisions, and pass/fail verdicts.
 - Inspect run records, reports, diffs, test output, and `HEAD` invariants after every Cursor invocation.
 - Block or approve before the next task or final verification.

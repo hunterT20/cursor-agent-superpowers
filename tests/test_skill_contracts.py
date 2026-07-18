@@ -12,8 +12,9 @@ USING_CURSOR_SUPERPOWERS = REPO_ROOT / "skills" / "using-cursor-superpowers" / "
 
 EXPECTED_NAME = "using-cursor-superpowers"
 EXPECTED_DESCRIPTION = (
-    "Use when a user wants Superpowers to discover, design, plan, review, or verify work "
-    "while Cursor Agent performs every implementation and review-fix edit."
+    "Use when a user wants a controller to plan, review, or verify work while Cursor Agent "
+    "performs every implementation and review-fix edit. Upstream Superpowers is optional; "
+    "when available, ask once per task before routing through upstream workflows."
 )
 
 REQUIRED_UPSTREAM_SKILLS = (
@@ -242,6 +243,117 @@ class UsingCursorSuperpowersContractTests(unittest.TestCase):
 
     def test_no_todo_placeholders_remain(self) -> None:
         self.assertNotRegex(self.body, r"\[TODO", msg="SKILL.md still contains TODO placeholders")
+
+    def test_detects_upstream_superpowers_availability_at_task_start(self) -> None:
+        patterns = (
+            r"check.*whether.*upstream.*superpowers.*available",
+            r"at.*task start.*check.*upstream",
+            r"upstream.*superpowers.*available.*runtime",
+            r"whether upstream.*superpowers.*skills.*available",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in patterns),
+            "Skill must check upstream Superpowers availability at task start",
+        )
+
+    def test_native_fallback_when_upstream_unavailable(self) -> None:
+        required_capabilities = (
+            ("planning", r"controller-native.*planning"),
+            ("review", r"controller-native.*review"),
+            ("verification", r"controller-native.*verification"),
+            ("branch completion", r"controller-native.*branch"),
+        )
+        for capability, pattern in required_capabilities:
+            with self.subTest(capability=capability):
+                self.assertTrue(
+                    re.search(pattern, self.combined, re.DOTALL),
+                    f"Skill must use controller-native {capability} when unavailable",
+                )
+        non_block_patterns = (
+            r"do not block",
+            r"not a blocker",
+            r"not block",
+            r"must not.*block",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in non_block_patterns),
+            "Skill must not block when upstream Superpowers is unavailable",
+        )
+        install_patterns = (
+            r"do not.*must be installed",
+            r"not.*must be installed",
+            r"not.*insist.*install",
+            r"do not.*insist.*install",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in install_patterns),
+            "Skill must not insist upstream Superpowers must be installed",
+        )
+
+    def test_once_per_task_confirmation_when_available(self) -> None:
+        patterns = (
+            r"ask.*once.*whole task",
+            r"once per task",
+            r"once for the whole task",
+            r"one.*confirmation.*task",
+            r"ask the user once",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in patterns),
+            "Skill must ask once per task when upstream Superpowers is available",
+        )
+
+    def test_no_upstream_task_routing_before_confirmation(self) -> None:
+        patterns = (
+            r"do not invoke.*upstream.*before.*confirm",
+            r"not route.*upstream.*before.*confirm",
+            r"do not.*route.*task through upstream",
+            r"before.*affirmative confirmation",
+            r"until the user confirms",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in patterns),
+            "Skill must not route through upstream Superpowers workflows before user confirmation",
+        )
+
+    def test_honors_confirmed_upstream_or_native_choice(self) -> None:
+        honor_patterns = (
+            r"honor.*explicit.*choice",
+            r"honor.*user.*choice",
+            r"explicit user choice",
+            r"governs the entire task",
+            r"whole task.*unless the user changes",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in honor_patterns),
+            "Skill must honor confirmed upstream or native choice for the whole task",
+        )
+        route_patterns = (
+            r"if.*confirm.*upstream",
+            r"if.*declin.*controller-native",
+            r"if the user confirms",
+            r"if the user declines",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in route_patterns),
+            "Skill must branch on confirmed upstream use or confirmed native handling",
+        )
+
+    def test_preserves_mandatory_overlay_routing_in_both_routes(self) -> None:
+        both_route_patterns = (
+            r"both routes",
+            r"in both routes",
+            r"either route",
+            r"whether.*unavailable.*available",
+            r"unavailable or declined",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in both_route_patterns),
+            "Skill must state overlay routing applies in both upstream and native routes",
+        )
+        for skill in REQUIRED_OVERLAY_SKILLS:
+            with self.subTest(skill=skill):
+                self.assertIn(skill, self.combined)
 
 
 EXECUTING_PLANS_WITH_CURSOR = REPO_ROOT / "skills" / "executing-plans-with-cursor" / "SKILL.md"
