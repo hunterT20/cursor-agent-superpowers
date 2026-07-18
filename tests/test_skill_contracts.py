@@ -13,7 +13,8 @@ USING_CURSOR_SUPERPOWERS = REPO_ROOT / "skills" / "using-cursor-superpowers" / "
 EXPECTED_NAME = "using-cursor-superpowers"
 EXPECTED_DESCRIPTION = (
     "Use when a user wants a controller to plan, review, or verify work while Cursor Agent "
-    "performs every implementation and review-fix edit. Upstream Superpowers is optional; "
+    "performs every semantic implementation and semantic review-fix edit and the controller may "
+    "apply only verified mechanical review patches. Upstream Superpowers is optional; "
     "when available, ask once per task before routing through upstream workflows."
 )
 
@@ -105,6 +106,16 @@ class UsingCursorSuperpowersContractTests(unittest.TestCase):
     def test_frontmatter_description_exact(self) -> None:
         self.assertEqual(self.frontmatter["description"], EXPECTED_DESCRIPTION)
 
+    def test_description_states_semantic_edits_and_mechanical_exception(self) -> None:
+        desc = self.frontmatter["description"].lower()
+        self.assertIn("semantic", desc)
+        self.assertIn("mechanical", desc)
+        self.assertNotIn(
+            "every implementation and review-fix edit",
+            desc,
+            "Description must not regress to blanket every review-fix edit wording",
+        )
+
     def test_names_required_upstream_skills(self) -> None:
         for skill in REQUIRED_UPSTREAM_SKILLS:
             with self.subTest(skill=skill):
@@ -131,7 +142,7 @@ class UsingCursorSuperpowersContractTests(unittest.TestCase):
             "Skill must state Codex/controller must not edit implementation code",
         )
 
-    def test_codex_must_not_edit_review_fix_code(self) -> None:
+    def test_semantic_review_fixes_route_to_cursor(self) -> None:
         patterns = (
             r"review-fix",
             r"review fix",
@@ -139,17 +150,133 @@ class UsingCursorSuperpowersContractTests(unittest.TestCase):
         )
         self.assertTrue(
             any(term in self.combined for term in patterns),
-            "Skill must mention review-fix edits as Cursor-only work",
+            "Skill must mention review-fix edits",
         )
-        deny_patterns = (
-            r"controller.*must not.*review-fix",
-            r"codex.*must not.*review-fix",
-            r"never.*review-fix.*edit",
+        route_patterns = (
+            r"review-fix.*cursor",
+            r"cursor.*review-fix",
+            r"semantic.*review-fix.*cursor",
+            r"semantic.*fix.*cursor agent",
         )
         self.assertTrue(
-            any(re.search(pattern, self.combined, re.DOTALL) for pattern in deny_patterns)
-            or "review-fix edit" in self.combined,
-            "Skill must forbid controller review-fix edits",
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in route_patterns),
+            "Skill must route semantic review-fix edits to Cursor Agent",
+        )
+
+    def test_mechanical_patch_exception_is_semantics_based(self) -> None:
+        mechanical_patterns = (
+            r"mechanical",
+            r"mechanical.*patch",
+            r"mechanical.*review",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in mechanical_patterns),
+            "Skill must define a mechanical review-patch exception",
+        )
+        semantic_patterns = (
+            r"semantic",
+            r"non-semantic",
+            r"deterministic",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in semantic_patterns),
+            "Skill must base the exception on edit semantics, not severity",
+        )
+
+    def test_mechanical_patch_allowlist_exhaustive(self) -> None:
+        allowlist_terms = (
+            "formatter",
+            "whitespace",
+            "typo",
+            "non-executable prose",
+            "comment",
+        )
+        for term in allowlist_terms:
+            with self.subTest(term=term):
+                self.assertIn(term, self.combined, f"Mechanical allowlist must include {term!r}")
+
+    def test_mechanical_patch_denylist_exhaustive(self) -> None:
+        denylist_terms = (
+            "executable code",
+            "test",
+            "configuration",
+            "schema",
+            "dependenc",
+            "lockfile",
+            "generated output",
+            "public api",
+            "security",
+            "authentication",
+            "business logic",
+            "code block",
+        )
+        for term in denylist_terms:
+            with self.subTest(term=term):
+                self.assertIn(term, self.combined, f"Mechanical denylist must include {term!r}")
+
+    def test_minor_severity_alone_not_mechanical_patch_authorization(self) -> None:
+        patterns = (
+            r"minor.*not.*(enough|sufficient|alone|authorize)",
+            r"minor.*severity.*not",
+            r"not.*minor.*alone",
+            r"severity.*not.*authorize",
+            r"line count.*not",
+            r"small.*line.*not",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in patterns),
+            "Skill must state minor severity or line count alone never authorizes a controller patch",
+        )
+
+    def test_mechanical_patch_allowed_files_and_no_scope_expansion(self) -> None:
+        scope_patterns = (
+            r"allowed files",
+            r"active.*brief",
+            r"no scope expansion",
+            r"does not expand scope",
+            r"unambiguous ownership",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in scope_patterns),
+            "Skill must limit mechanical patches to allowed brief files with no scope expansion",
+        )
+
+    def test_mechanical_patch_evidence_and_rereview_required(self) -> None:
+        evidence_patterns = (
+            r"controller-patch",
+            r"controller patch",
+            r"patch evidence",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in evidence_patterns),
+            "Skill must require durable controller-patch evidence",
+        )
+        for field in ("finding", "classification", "controller identity", "verification"):
+            with self.subTest(field=field):
+                self.assertIn(field, self.combined, f"Patch evidence must include {field!r}")
+        rereview_patterns = (
+            r"re-review.*before.*approv",
+            r"rerun.*covering",
+            r"exact.*covering.*verification",
+            r"covering verification.*rerun",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in rereview_patterns),
+            "Skill must require exact covering verification rerun and re-review before approval",
+        )
+
+    def test_mechanical_patch_fallback_to_cursor_on_ambiguity(self) -> None:
+        fallback_patterns = (
+            r"uncertain.*cursor-agent-bridge",
+            r"ambiguous.*cursor-agent-bridge",
+            r"uncertain.*consolidated fix brief",
+            r"verification fail.*cursor-agent-bridge",
+            r"scope expand.*cursor-agent-bridge",
+            r"patch grow.*cursor-agent-bridge",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in fallback_patterns),
+            "Skill must route ambiguous, growing, or failed mechanical patches to Cursor",
         )
 
     def test_routes_implementation_to_cursor_agent(self) -> None:
@@ -642,6 +769,45 @@ class ExecutingPlansWithCursorContractTests(unittest.TestCase):
             "Skill must forbid Codex/controller implementation edits",
         )
 
+    def test_mechanical_review_patch_exception_in_execution_skill(self) -> None:
+        mechanical_patterns = (
+            r"mechanical",
+            r"mechanical.*patch",
+            r"mechanical.*review",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.full_combined, re.DOTALL) for pattern in mechanical_patterns),
+            "Execution skill must document the mechanical review-patch exception",
+        )
+        semantic_patterns = (
+            r"semantic.*review-fix",
+            r"review-fix.*semantic",
+            r"semantic.*implementation",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.full_combined, re.DOTALL) for pattern in semantic_patterns),
+            "Execution skill must preserve Cursor ownership of semantic review-fix edits",
+        )
+        blanket_patterns = (
+            r"every implementation and review-fix edit belongs to cursor",
+            r"every implementation and review-fix edit belongs to cursor agent",
+        )
+        self.assertFalse(
+            any(re.search(pattern, self.combined, re.DOTALL) for pattern in blanket_patterns),
+            "Execution skill must not claim all review-fix edits are Cursor-only without the mechanical exception",
+        )
+        reference_patterns = (
+            r"reviewing-cursor-changes",
+            r"execution-contracts",
+        )
+        for pattern in reference_patterns:
+            with self.subTest(pattern=pattern):
+                self.assertIn(
+                    pattern,
+                    self.full_combined,
+                    f"Mechanical exception must reference {pattern!r}",
+                )
+
     def test_required_body_sections_present(self) -> None:
         for section in EXECUTION_REQUIRED_BODY_SECTIONS:
             with self.subTest(section=section):
@@ -737,17 +903,23 @@ REVIEW_REQUIRED_INPUTS = (
 )
 
 
-def load_review_skill() -> tuple[dict[str, str], str, str]:
+def load_review_skill() -> tuple[dict[str, str], str, str, str, str]:
     text = REVIEWING_CURSOR_CHANGES.read_text(encoding="utf-8")
     frontmatter, body = parse_frontmatter(text)
     combined = f"{frontmatter.get('description', '')}\n{body}".lower()
-    return frontmatter, body, combined
+    reference = ""
+    if EXECUTION_CONTRACTS_REFERENCE.is_file():
+        reference = EXECUTION_CONTRACTS_REFERENCE.read_text(encoding="utf-8")
+    full_combined = f"{combined}\n{reference}".lower()
+    return frontmatter, body, combined, reference, full_combined
 
 
 class ReviewingCursorChangesContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.frontmatter, cls.body, cls.combined = load_review_skill()
+        cls.frontmatter, cls.body, cls.combined, cls.reference, cls.full_combined = (
+            load_review_skill()
+        )
 
     def test_skill_file_exists(self) -> None:
         self.assertTrue(REVIEWING_CURSOR_CHANGES.is_file())
@@ -931,17 +1103,135 @@ class ReviewingCursorChangesContractTests(unittest.TestCase):
             "Skill must record minor findings for final whole-change review",
         )
 
-    def test_controller_must_not_apply_fixes(self) -> None:
+    def test_semantic_fixes_remain_cursor_only(self) -> None:
         patterns = (
             r"controller.*must not.*edit",
             r"codex.*must not.*edit",
-            r"never.*apply.*fix",
             r"must not.*implementation fix",
             r"does not edit.*implementation",
+            r"cursor owns.*fix",
         )
         self.assertTrue(
             any(re.search(pattern, self.combined, re.DOTALL) for pattern in patterns),
-            "Skill must forbid Codex/controller from applying implementation fixes",
+            "Skill must forbid Codex/controller from applying semantic implementation fixes",
+        )
+
+    def test_mechanical_review_patch_exception_defined(self) -> None:
+        mechanical_patterns = (
+            r"mechanical",
+            r"mechanical.*patch",
+            r"mechanical.*review",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.full_combined, re.DOTALL) for pattern in mechanical_patterns),
+            "Review contract must define a mechanical review-patch exception",
+        )
+
+    def test_mechanical_patch_allowlist_in_review_contract(self) -> None:
+        allowlist_terms = (
+            "formatter",
+            "whitespace",
+            "typo",
+            "non-executable prose",
+            "comment",
+        )
+        for term in allowlist_terms:
+            with self.subTest(term=term):
+                self.assertIn(
+                    term,
+                    self.full_combined,
+                    f"Review mechanical allowlist must include {term!r}",
+                )
+
+    def test_mechanical_patch_denylist_in_review_contract(self) -> None:
+        denylist_terms = (
+            "executable code",
+            "test",
+            "configuration",
+            "schema",
+            "dependenc",
+            "lockfile",
+            "generated output",
+            "public api",
+            "security",
+            "authentication",
+            "business logic",
+            "code block",
+        )
+        for term in denylist_terms:
+            with self.subTest(term=term):
+                self.assertIn(
+                    term,
+                    self.full_combined,
+                    f"Review mechanical denylist must include {term!r}",
+                )
+
+    def test_minor_severity_not_sufficient_for_controller_patch(self) -> None:
+        patterns = (
+            r"minor.*not.*(enough|sufficient|alone|authorize)",
+            r"minor.*severity.*not",
+            r"not.*minor.*alone",
+            r"severity.*not.*authorize",
+            r"line count.*not",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.full_combined, re.DOTALL) for pattern in patterns),
+            "Review contract must state minor severity alone never authorizes a controller patch",
+        )
+
+    def test_task_remains_in_review_during_controller_patch(self) -> None:
+        patterns = (
+            r"in-review.*controller patch",
+            r"controller patch.*in-review",
+            r"remains.*in-review",
+            r"stay.*in-review",
+            r"in-review.*mechanical",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.full_combined, re.DOTALL) for pattern in patterns),
+            "Task must remain in-review while a controller mechanical patch is applied",
+        )
+
+    def test_controller_patch_evidence_artifact_required(self) -> None:
+        self.assertIn("controller-patch", self.full_combined)
+        for field in ("finding", "classification", "controller identity", "verification"):
+            with self.subTest(field=field):
+                self.assertIn(
+                    field,
+                    self.full_combined,
+                    f"Controller-patch evidence must record {field!r}",
+                )
+
+    def test_mechanical_patch_requires_exact_rerun_and_rereview(self) -> None:
+        rerun_patterns = (
+            r"exact.*covering",
+            r"covering verification",
+            r"rerun.*verification",
+            r"rerun.*covering",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.full_combined, re.DOTALL) for pattern in rerun_patterns),
+            "Mechanical patch must require exact covering verification rerun",
+        )
+        self.assertTrue(
+            re.search(r"re-review.*before.*approv", self.full_combined, re.DOTALL)
+            or "re-review" in self.full_combined and "approved" in self.full_combined,
+            "Mechanical patch must require fresh diff re-review before approved",
+        )
+
+    def test_mechanical_patch_fallback_to_cursor_bridge(self) -> None:
+        fallback_patterns = (
+            r"uncertain.*cursor-agent-bridge",
+            r"ambiguous.*cursor-agent-bridge",
+            r"uncertain.*consolidated fix brief",
+            r"verification fail.*cursor-agent-bridge",
+            r"scope expand.*cursor-agent-bridge",
+            r"patch grow.*cursor-agent-bridge",
+            r"consolidated fix brief.*cursor-agent-bridge",
+        )
+        self.assertTrue(
+            any(re.search(pattern, self.full_combined, re.DOTALL) for pattern in fallback_patterns),
+            "Uncertain, growing, or failed mechanical patches must route to Cursor via bridge",
         )
 
     def test_no_advance_after_non_approved_verdict(self) -> None:

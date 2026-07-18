@@ -15,7 +15,9 @@ A Superpowers overlay where Codex/Superpowers plans and reviews while Cursor Age
 
 The **controller** (Codex or Superpowers) owns discovery, design, planning, review, verification, and branch completion. It writes task and review briefs, inspects run records and diffs, and emits pass/fail verdicts.
 
-**Cursor Agent** owns implementation edits and review-fix edits inside the isolated workspace. It runs bounded tests and writes the required worker report.
+**Cursor Agent** owns semantic implementation edits and semantic review-fix edits inside the isolated workspace. It runs bounded tests and writes the required worker report.
+
+The **controller** may apply a narrow **mechanical review patch** during review when a finding is deterministic and non-semantic: only formatter output, whitespace, or a typo in non-executable prose or a comment. **Minor** severity or a small line count alone is **not** enough — classification depends on edit semantics. The controller never patches executable code, tests, configuration, schemas, dependencies, lockfiles, generated output, public APIs, security/authentication/data/business logic, or commands and code blocks in documentation. Patches are limited to the active brief's allowed files, stay **`in-review`** while applied, require durable controller-patch evidence, exact covering verification rerun, and fresh diff re-review before approval. Uncertain, growing, or failed patches route back to Cursor through the bridge.
 
 Cursor must **not** commit, push, merge, rebase, reset, tag, or switch branches.
 
@@ -32,7 +34,7 @@ Cursor must **not** commit, push, merge, rebase, reset, tag, or switch branches.
    2. Dispatch **one fresh Cursor session** through `cursor-agent-bridge`.
    3. Wait for the bridge run to finish.
    4. Run `reviewing-cursor-changes` on the run record, worker report, diff, test output, and `HEAD` invariants.
-   5. If the verdict is `fix-required`, write one consolidated `review-brief.md` and re-dispatch through the bridge; resume only within that task's review-fix loop when resumable.
+   5. If the verdict is `fix-required`, write one consolidated `review-brief.md` and re-dispatch through the bridge; resume only within that task's review-fix loop when resumable. If a finding qualifies as a mechanical review patch, the controller may patch directly per `reviewing-cursor-changes`, record `controller-patch.md`, rerun exact covering verification, and re-review before approval.
    6. Mark the task complete in `progress.md` only after review returns `approved`.
 6. After all tasks are approved, run controller-side verification (`superpowers:verification-before-completion` when confirmed, or controller-native verification when not) and branch completion (`superpowers:finishing-a-development-branch` when confirmed, or controller-native branch completion when not).
 

@@ -12,6 +12,7 @@ All orchestration artifacts live under `.superpowers/cursor-execution/` inside t
 | `.superpowers/cursor-execution/task-<id>/brief.md` | Bounded task brief for the active task |
 | `.superpowers/cursor-execution/task-<id>/report.md` | Worker report path (written by Cursor) |
 | `.superpowers/cursor-execution/task-<id>/review-brief.md` | Consolidated fix brief when review requires changes |
+| `.superpowers/cursor-execution/task-<id>/controller-patch.md` | Durable mechanical controller-patch evidence |
 | `.superpowers/cursor-execution/task-<id>/run-record.json` | Bridge run record |
 | `.superpowers/cursor-execution/task-<id>/stdout.txt` | Captured stdout sidecar |
 | `.superpowers/cursor-execution/task-<id>/stderr.txt` | Captured stderr sidecar |
@@ -50,6 +51,24 @@ The controller writes the brief file before invoking the bridge. Cursor reads th
 
 Update the ledger after every review decision. Do not mark a task `approved` until `reviewing-cursor-changes` passes. The ledger, not the worker summary, defines what is done.
 
+## Mechanical controller-patch contract
+
+When `reviewing-cursor-changes` identifies a finding that qualifies for the mechanical review-patch exception, the controller may patch directly instead of routing to Cursor. The exception is semantics-based: **minor** severity or a small line count alone is **not** sufficient.
+
+**Allowlist (exhaustive):** formatter output; whitespace; a typo in non-executable prose or a comment.
+
+**Denylist (never patch):** executable code and tests; configuration and schemas; dependencies, lockfiles, and generated output; public APIs; security, authentication, data, and business logic; commands and code blocks in documentation.
+
+Requirements:
+
+- Patch only files in the active brief's **allowed files** with unambiguous ownership and **no scope expansion**.
+- Keep the task **`in-review`** while applying the patch.
+- Write `.superpowers/cursor-execution/task-<id>/controller-patch.md` with the **finding**, **classification**, changed files/diff, **controller identity**, and **verification** results.
+- Rerun the **exact covering verification** commands from the brief.
+- **Re-review** the fresh diff before changing status to `approved`.
+
+If classification is uncertain, the patch grows, scope expands, or verification fails, stop and route **one consolidated fix brief** through `cursor-agent-bridge` instead.
+
 ## Blocker handling
 
 Stop the sequential loop and record the blocker in `progress.md` when:
@@ -63,4 +82,4 @@ Stop the sequential loop and record the blocker in `progress.md` when:
 | Out-of-scope changes cannot be resolved safely | Stop; record blocker |
 | Git state does not match ledger after interruption | Stop; record blocker |
 
-Do not reset history, auto-commit, or patch implementation code as the controller. Report the blocker and wait for user direction.
+Do not reset history, auto-commit, or patch semantic implementation code as the controller. Mechanical review patches are the sole exception and must follow the contract above. Report the blocker and wait for user direction.
