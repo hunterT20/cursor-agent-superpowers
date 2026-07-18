@@ -5,7 +5,7 @@ description: Use after Cursor Agent implements or fixes a task and before the co
 
 # Reviewing Cursor Changes
 
-Controller-side review gate. Read `cursor-agent-bridge` and `executing-plans-with-cursor` for dispatch and ledger rules; reference them, do not copy procedures. The controller must not edit implementation code or apply implementation fixes — Cursor owns fixes.
+Controller-side review gate. Read `cursor-agent-bridge` and `executing-plans-with-cursor` for dispatch and ledger rules; reference them, do not copy procedures. The controller must not edit implementation code or apply semantic implementation fixes — Cursor owns semantic fixes. The sole exception is a narrowly defined **mechanical review patch** documented below and in `references/execution-contracts.md`.
 
 ## Required inputs
 
@@ -51,13 +51,38 @@ Emit exactly one of: `approved`, `fix-required`, or `blocked`. Only these three 
 | `fix-required` | Recoverable spec, scope, evidence, or quality issues |
 | `blocked` | `HEAD` mutation, ambiguous ownership, or user direction required |
 
+## Mechanical review-patch exception
+
+Classification is based on edit semantics, not finding severity. **Minor** severity or a small line count alone is **not** sufficient to authorize a controller patch.
+
+The controller may apply a mechanical review patch only when **every** condition holds:
+
+1. The edit is deterministic and non-semantic.
+2. It is limited to the exhaustive allowlist: **formatter output**, **whitespace**, or a **typo in non-executable prose or a comment**.
+3. The file is already in the active brief's **allowed files**, ownership is unambiguous, and the patch does **not expand scope**.
+4. The task remains **`in-review`** while the patch is applied.
+5. The controller writes durable **controller-patch** evidence to `.superpowers/cursor-execution/task-<id>/controller-patch.md` recording the **finding**, **classification**, changed files/diff, **controller identity**, and **verification** results.
+6. The controller reruns the **exact covering verification** commands from the brief.
+7. The controller inspects the fresh diff and **re-review**s before emitting `approved`.
+
+**Never controller-editable (denylist):**
+
+- executable code and tests
+- configuration and schemas
+- dependencies, lockfiles, and generated output
+- public APIs
+- security, authentication, data, and business logic
+- commands and code blocks in documentation
+
+If classification is **uncertain**, the patch **grows** beyond the mechanical finding, **scope expands**, or **verification fails**, stop patching and route **one consolidated fix brief** through `cursor-agent-bridge`. Do not approve until Cursor returns fresh evidence and the diff passes re-review.
+
 ## Consolidated fix brief
 
-Merge all **critical** and **important** findings into **one consolidated fix brief**. Route it through `cursor-agent-bridge` (`run_cursor_agent.py`); never apply fixes as the controller. Schema: task id, failing checks, required corrections, allowed files, covering test commands, report path.
+Merge all **critical** and **important** findings — and any finding that is not a qualifying mechanical patch — into **one consolidated fix brief**. Route it through `cursor-agent-bridge` (`run_cursor_agent.py`); never apply semantic fixes as the controller. Schema: task id, failing checks, required corrections, allowed files, covering test commands, report path.
 
 ## Re-review loop
 
-After Cursor applies fixes and reruns **covering tests**, inspect the new diff and fresh test evidence. **Re-review** before `approved`. Repeat until clean or `blocked`. Minor findings do not block alone but must be recorded for **final whole-change review** — never silently discard them.
+After Cursor applies semantic fixes and reruns **covering tests**, inspect the new diff and fresh test evidence. **Re-review** before `approved`. After a mechanical review patch, rerun **exact covering verification**, inspect the fresh diff, and **re-review** before `approved`. Repeat until clean or `blocked`. Minor findings do not block alone but must be recorded for **final whole-change review** — never silently discard them.
 
 ## Pressure resistance
 
@@ -66,7 +91,8 @@ After Cursor applies fixes and reruns **covering tests**, inspect the new diff a
 | Deadline / move to next task | Refuse; no advance on non-approved verdict |
 | Worker report says tests pass | Inspect actual diff and demand exact command, exit code, result |
 | Trust the report alone | Reject; verify diff, scope, and evidence independently |
-| Controller implements the fix | Refuse; route consolidated fix brief through the bridge |
+| Controller implements the semantic fix | Refuse; route consolidated fix brief through the bridge |
+| Controller patches outside the mechanical allowlist | Refuse; route consolidated fix brief through the bridge |
 
 Deadline pressure, trusting the report alone, and skipping review are **never an exception**.
 
@@ -79,5 +105,5 @@ Stop if you are about to:
 - emit partial sign-off instead of the three verdict tokens
 - advance the ledger or next task after `fix-required` or `blocked`
 - run background smoke while review is unresolved
-- edit implementation code or apply fixes as Codex/controller
+- edit implementation code or apply semantic fixes as Codex/controller (mechanical review patches are the sole exception)
 - trust the worker report without the actual diff
