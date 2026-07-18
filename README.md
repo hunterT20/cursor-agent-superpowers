@@ -11,6 +11,22 @@ A Superpowers overlay where Codex/Superpowers plans and reviews while Cursor Age
 | `executing-plans-with-cursor` | Executes an approved plan with sequential dispatch as the default in one shared worktree, or parallel isolated waves (up to three concurrent tasks) only when dependency graph, disjoint write sets, and integration-surface proof are explicit. |
 | `reviewing-cursor-changes` | Controller review gate that inspects artifacts, diff, and test evidence before a task is marked complete. |
 
+## What changed in this upgrade
+
+This overlay now documents two controller upgrades. Details live in `reviewing-cursor-changes`, `executing-plans-with-cursor`, and `references/execution-contracts.md`; the points below are the quick orientation.
+
+**Mechanical controller review-patch exception.** During review, the controller may patch directly only when a finding is deterministic and non-semantic: formatter output, whitespace, or a typo in non-executable prose or a comment. **Minor** severity or a small diff alone is **not** enough — classification depends on edit semantics. Semantic changes still route to Cursor through `cursor-agent-bridge`. Every mechanical patch stays **`in-review`**, requires durable `controller-patch.md` evidence, an exact covering verification rerun, and fresh diff re-review before approval.
+
+**Dependency-proven parallel isolated waves.** **Sequential execution remains the default** in one integration worktree. Parallel dispatch is **not** automatic. The controller may authorize a parallel wave only when the approved plan includes an explicit dependency graph (no edges among wave tasks), declared disjoint write sets, and proof of no shared integration-sensitive contracts (API, schema, configuration surface, lockfile, generated output, migration chain, and similar). Parallel work uses **sibling** isolated worktrees — never nested — with a maximum of **three** concurrently active Cursor tasks. Isolated review yields **`approved-isolated`**; the controller then owns sequential integration (one branch at a time in plan order), verification after each integration and the full suite at wave end, and only then marks tasks **`approved`**.
+
+### Focus points (non-negotiable)
+
+- **Cursor/controller role separation** — Cursor owns semantic implementation and semantic review-fix edits; the controller owns planning, review, verification, and branch completion. Mechanical review patches are the sole controller edit exception.
+- **`HEAD` invariant** — Every bridge invocation must leave `HEAD` unchanged and recorded; unrecorded or unexpected worker `HEAD` mutation is a blocker.
+- **Authoritative integration ledger** — `.superpowers/cursor-execution/progress.md` in the integration worktree is the source of truth for task status, task commit SHAs, and integrated HEADs; resume from the ledger, not task-scoped execution artifacts.
+- **Scope and evidence gates** — Task brief allowed files, worker reports, diffs, test output, and review verdicts must pass before status advances. Bridge exit `0` and worker success messages are not completion proof.
+- **No automatic rollback after mid-integration failure** — If integration fails mid-wave, preserve already-integrated HEADs, stop before remaining branches, and require an explicit recovery decision; do not reset history or auto-merge remaining branches.
+
 ## Role boundary
 
 The **controller** (Codex or Superpowers) owns discovery, design, planning, review, verification, and branch completion. It writes task and review briefs, inspects run records and diffs, and emits pass/fail verdicts.
