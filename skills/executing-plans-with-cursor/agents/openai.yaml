@@ -1,4 +1,4 @@
 interface:
   display_name: "Executing Plans with Cursor"
   short_description: "Execute approved plans through Cursor task workers"
-  default_prompt: "Execute this approved plan sequentially through Cursor Agent with review after every task."
+  default_prompt: "Execute this approved plan with sequential dispatch as the default, or parallel isolated waves only when dependency graph and integration-surface proof is explicit."
