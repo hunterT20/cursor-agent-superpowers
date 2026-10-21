@@ -22,7 +22,7 @@ This overlay now documents two controller upgrades. Details live in `reviewing-c
 ### Focus points (non-negotiable)
 
 - **Cursor/controller role separation** — Cursor owns semantic implementation and semantic review-fix edits; the controller owns planning, review, verification, and branch completion. Mechanical review patches are the sole controller edit exception.
-- **`HEAD` invariant** — Every bridge invocation must leave `HEAD` unchanged and recorded; unrecorded or unexpected worker `HEAD` mutation is a blocker.
+- **`HEAD`/index invariant** — Every bridge invocation must leave `HEAD` and the git index unchanged and recorded; unrecorded or unexpected worker `HEAD` or index (`git add`/`stash`/`reset`) mutation is a blocker.
 - **Authoritative integration ledger** — `.superpowers/cursor-execution/progress.md` in the integration worktree is the source of truth for task status, task commit SHAs, and integrated HEADs; resume from the ledger, not task-scoped execution artifacts.
 - **Scope and evidence gates** — Task brief allowed files, worker reports, diffs, test output, and review verdicts must pass before status advances. Bridge exit `0` and worker success messages are not completion proof.
 - **No automatic rollback after mid-integration failure** — If integration fails mid-wave, preserve already-integrated HEADs, stop before remaining branches, and require an explicit recovery decision; do not reset history or auto-merge remaining branches.
@@ -49,33 +49,37 @@ Cursor must **not** commit, push, merge, rebase, reset, tag, or switch branches.
    1. Write `task-<id>/brief.md` as a regular file on disk before invoking the bridge.
    2. Dispatch **one fresh Cursor session** through `cursor-agent-bridge`.
    3. Wait for the bridge run to finish.
-   4. Run `reviewing-cursor-changes` on the run record, worker report, diff, test output, and `HEAD` invariants.
+   4. Run `reviewing-cursor-changes` on the run record, worker report, diff, test output, and `HEAD`/index invariants.
    5. If the verdict is `fix-required`, write one consolidated `review-brief.md` and re-dispatch through the bridge; resume only within that task's review-fix loop when resumable. If a finding qualifies as a mechanical review patch, the controller may patch directly per `reviewing-cursor-changes`, record `controller-patch.md`, rerun exact covering verification, and re-review before approval.
-   6. Mark the task `approved` in the integration ledger only after review returns `approved`. In parallel waves, isolated review yields `approved-isolated`; integration starts only when **every** wave task is `approved-isolated` (do not integrate a subset). The controller then commits task branches (recording task commit SHA), integrates them one at a time in plan order (recording integrated HEAD), reruns affected verification after each integration and the full suite at wave end, and only then marks tasks `approved`. If integration fails mid-wave, preserve already-integrated HEADs, stop before remaining branches, do not reset or auto-rollback history, and require an explicit recovery decision. Resume from the integration ledger, not task-scoped execution artifacts.
+   6. Mark the task `approved` in the integration ledger only after review returns `approved`; in sequential mode the controller then commits the task's changes (excluding `.superpowers/` execution artifacts) and records the task commit SHA as the next baseline. In parallel waves, isolated review yields `approved-isolated`; integration starts only when **every** wave task is `approved-isolated` (do not integrate a subset). The controller then commits task branches (recording task commit SHA), integrates them one at a time in plan order (recording integrated HEAD), reruns affected verification after each integration and the full suite at wave end, and only then marks tasks `approved`. If integration fails mid-wave, preserve already-integrated HEADs, stop before remaining branches, do not reset or auto-rollback history, and require an explicit recovery decision. Resume from the integration ledger, not task-scoped execution artifacts.
 6. After all tasks are `approved`, run controller-side verification (`superpowers:verification-before-completion` when confirmed, or controller-native verification when not) and branch completion (`superpowers:finishing-a-development-branch` when confirmed, or controller-native branch completion when not).
 
-Do not fan-out parallel implementers in one worktree. Do not authorize parallel waves without explicit dependency and integration-surface proof. The bridge `HEAD` invariant applies across every Cursor invocation; unrecorded HEAD changes are blockers. Any wave overlap, unexpected worker `HEAD` mutation, blocked task, merge conflict, or integration-test failure stops the wave; do not integrate a subset or automatically merge remaining branches; fall back to a fresh sequential path. Never advance on a worker success message or bridge exit `0` alone.
+Do not fan-out parallel implementers in one worktree. Do not authorize parallel waves without explicit dependency and integration-surface proof. The bridge `HEAD`/index invariant applies across every Cursor invocation; unrecorded `HEAD` or index changes are blockers. Any wave overlap, unexpected worker `HEAD` mutation, blocked task, merge conflict, or integration-test failure stops the wave; do not integrate a subset or automatically merge remaining branches; fall back to a fresh sequential path. Never advance on a worker success message or bridge exit `0` alone.
 
 ## Bridge invocation
 
 The controller writes the task brief in a **separate prior step**. The runner command references only the pre-existing absolute file path. Do not create the brief in the same shell command as the runner (no process substitution, heredocs, or inline task creation).
 
 ```bash
-python3 skills/cursor-agent-bridge/scripts/run_cursor_agent.py \
+python3 /absolute/path/to/cursor-agent-bridge/scripts/run_cursor_agent.py \
   --workspace /absolute/workspace \
   --task-brief /absolute/task-brief.md \
   --report /absolute/report.md \
   --run-record /absolute/run-record.json \
   --stdout-file /absolute/stdout.txt \
-  --stderr-file /absolute/stderr.txt
+  --stderr-file /absolute/stderr.txt \
+  [--timeout SECONDS] \
+  [--expect-clean] \
+  [--allowed-file PATH ...] \
+  [--notify-command CMD]
 ```
 
-All artifact paths must be absolute. The runner always invokes Cursor with model `composer-2.5[fast=false]`.
+All artifact paths must be absolute and distinct. Invoke the runner by its absolute path — `skills/cursor-agent-bridge/scripts/run_cursor_agent.py` in a source checkout, or `scripts/run_cursor_agent.py` inside the installed `cursor-agent-bridge` skill directory. The runner always invokes Cursor with model `composer-2.5[fast=false]` and the workspace as the child process working directory, takes an exclusive per-workspace dispatch lock (exit `17`), kills the whole process group when a run exceeds `--timeout` (exit `13`), enforces `--allowed-file` scope (exit `14`), and maps worker `Status: blocked`/`failed` reports to exits `15`/`16`, and writes the run record atomically once at run end — its existence is the completion signal. To wait without polling, call `wait_cursor_run.py <run-record.json>` once (or with several records for a parallel wave); `--notify-command` adds external push notification after the record is written.
 
 ## Safety notes
 
 - `--force` is used only after the controller verifies worktree isolation and bounded task scope. Do not use the bridge for planning, review, verification, or branch-completion tasks.
-- The controller independently verifies the worker report, actual diff, test output, and `HEAD` invariants. Never trust the worker summary alone.
+- The controller independently verifies the worker report, actual diff, test output, and `HEAD`/index invariants. Never trust the worker summary alone.
 - Bridge exit `0` and worker `STATUS=implemented` are invocation evidence, **not** proof that the task is complete.
 
 ## Validation
@@ -85,7 +89,14 @@ python3 -m unittest discover -s tests -v
 python3 /Users/chaileasevn/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/<skill-name>
 ```
 
-Run the unittest suite for bridge and contract coverage. Run `quick_validate.py` once per skill folder before installation.
+Run the unittest suite for bridge, contract, ledger, and end-to-end sequential-loop coverage. Run `quick_validate.py` once per skill folder before installation.
+
+## Tooling
+
+- `skills/cursor-agent-bridge/scripts/run_cursor_agent.py` — deterministic bridge runner (see above).
+- `skills/cursor-agent-bridge/scripts/wait_cursor_run.py` — blocking wait for one or more run records; the controller's "worker finished" signal without polling (one call can wait on a whole parallel wave).
+- `skills/executing-plans-with-cursor/scripts/ledger.py` — manage the authoritative `progress.md` ledger (`init`, `set`, `validate`, `status`, `coverage --plan plan.yaml`).
+- `sync-local.sh` — sync the four skills into `~/.agents/skills`; `--check` fails when the installed copies drift from the repo.
 
 ## Installation
 

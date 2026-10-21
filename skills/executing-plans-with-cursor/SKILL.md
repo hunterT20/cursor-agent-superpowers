@@ -36,14 +36,15 @@ Execute the approved plan **sequentially** in the **integration worktree** when 
 
 For each task in plan order:
 
-1. Read the authoritative integration ledger at `.superpowers/cursor-execution/progress.md` and verify git `HEAD` matches the ledger's recorded state.
+1. Read the authoritative integration ledger at `.superpowers/cursor-execution/progress.md` and verify git `HEAD` matches the ledger's recorded state. Use `scripts/ledger.py` (`validate`, `set`, `status`, `coverage`) so the ledger never drifts from its schema.
 2. If the task is not already complete, write `task-<id>/brief.md` under the integration worktree artifact root per `references/execution-contracts.md`.
-3. Start **one fresh Cursor session per task** through `cursor-agent-bridge` (`run_cursor_agent.py`). Never call `cursor-agent` directly. The **bridge `HEAD` invariant** applies across **every Cursor invocation** — any unexpected worker `HEAD` mutation is a blocker.
-4. Wait for the bridge run to finish. Bridge exit `0` and worker `STATUS=implemented` are invocation evidence, **not** task completion.
-5. Load `reviewing-cursor-changes` and review run record, report, diff, test output, and `HEAD` invariants. Apply a mechanical review patch only when the review skill and execution-contract reference authorize it; route all semantic fixes through the bridge.
+3. Start **one fresh Cursor session per task** through `cursor-agent-bridge` (`run_cursor_agent.py`). Never call `cursor-agent` directly. Pass the brief's file scope as repeated `--allowed-file` flags so scope is enforced by the runner, and pass `--expect-clean` once a task-commit baseline exists. The **bridge `HEAD`/index invariant** and the per-workspace **dispatch lock** apply across **every Cursor invocation** — any unexpected worker `HEAD` or index mutation, scope violation, or concurrent dispatch is a blocker.
+4. Wait for the bridge run to finish — call `scripts/wait_cursor_run.py <run-record.json>` once (or wait on the synchronous runner call); never poll run state in a loop. The run record is written atomically only when the run ends, so its existence is the completion signal. Bridge exit `0` and worker `STATUS=implemented` are invocation evidence, **not** task completion.
+5. Load `reviewing-cursor-changes` and review run record, report, diff, test output, and `HEAD`/index invariants. Apply a mechanical review patch only when the review skill and execution-contract reference authorize it; route all semantic fixes through the bridge.
 6. If review verdict is `fix-required`, write one consolidated `review-brief.md` and re-dispatch through the bridge. **Resume only within this task's review-fix loop** using `--resume-session` when resumable; otherwise start fresh with both brief paths.
-7. Mark the task `approved` in the integration ledger only after `reviewing-cursor-changes` returns `approved` with sufficient evidence.
-8. Proceed to the next task — no skip review, no advance on a worker success message alone.
+7. After `reviewing-cursor-changes` returns `approved`, the **controller commits** the task's changes in the integration worktree — bounded to the brief's allowed files and excluding `.superpowers/` execution artifacts — and records the **task commit SHA** in the ledger. This commit is the new sequential baseline: the next dispatch's `head_before` must equal it, so each task's reviewable diff stays isolated to that task. Controller commits are expected `HEAD` movement — the bridge invariant governs Cursor invocations, not the controller — and every commit is recorded.
+8. Mark the task `approved` in the integration ledger only after `reviewing-cursor-changes` returns `approved` with sufficient evidence and the task commit SHA is recorded.
+9. Proceed to the next task — no skip review, no advance on a worker success message alone.
 
 Repeat until every plan task has a ledger entry marked `approved` or the workflow is blocked. After interruption, **resume from the authoritative integration ledger**, verify every recorded branch/worktree/artifact path and git state, then continue — not from conversation memory. Worker reports and local artifacts are **evidence**, not alternate state authorities.
 
@@ -59,7 +60,7 @@ When the routing decision authorizes a parallel wave:
    - **one fresh Cursor session per task** through `cursor-agent-bridge`. Never call `cursor-agent` directly.
    Do **not** recursively invoke `superpowers:using-git-worktrees` from inside a linked worktree. Record every task's **absolute worktree path**, branch, artifact root, wave-base HEAD, and session in the **authoritative integration ledger**.
 3. Cursor must **not** commit, push, merge, rebase, reset, tag, switch branches, or create/remove worktrees. The controller owns task commits and integration.
-4. For each task, run `reviewing-cursor-changes` on run record, report, diff, test output, and **bridge `HEAD` invariants**. Apply mechanical review patches only per `reviewing-cursor-changes` and `references/execution-contracts.md`.
+4. For each task, run `reviewing-cursor-changes` on run record, report, diff, test output, and **bridge `HEAD`/index invariants**. Apply mechanical review patches only per `reviewing-cursor-changes` and `references/execution-contracts.md`.
 5. A task that passes isolated review becomes **`approved-isolated`**, not `approved` or complete. Re-dispatch through the bridge for `fix-required` verdicts; **resume only within that task's review-fix loop**.
 6. **Integration may start only when every wave task is `approved-isolated`.** `fix-required` remains inside that task's review loop. Any `blocked`, `failed`, unresolved, overlap, unexpected worker **`HEAD` mutation**, or missing artifact **stops the wave** and **prevents integration of every not-yet-integrated branch**. **Do not integrate a subset** because other tasks passed.
 7. After **all** wave tasks are `approved-isolated`:
@@ -121,3 +122,4 @@ Stop if you are about to:
 - advance integration while review is pending, `fix-required`, or a wave blocker is unresolved
 - let Cursor commit, push, merge, rebase, reset, tag, switch branches, or manage worktrees
 - create nested task worktrees or omit task worktree paths from the integration ledger
+- advance a sequential task to `approved` without the controller's recorded task commit, or leave worker changes uncommitted so later task diffs cannot be attributed

@@ -32,7 +32,11 @@ Each parallel-wave task worktree holds **task-scoped execution artifacts/evidenc
 | `.superpowers/cursor-execution/task-<id>/stdout.txt` | Captured stdout sidecar |
 | `.superpowers/cursor-execution/task-<id>/stderr.txt` | Captured stderr sidecar |
 
-Task-scoped execution artifacts are **evidence**, not alternate state authorities. Only the **integration ledger** and wave evidence in the **integration worktree** define state.
+Task-scoped execution artifacts are **evidence**, not alternate state authorities. Only the **integration ledger** and wave evidence in the **integration worktree** define state. `.superpowers/` execution artifacts are excluded from task diffs and task commits.
+
+## Waiting on runs — never poll
+
+`run-record.json` is written **once, atomically**, only when a run ends — its existence is the completion signal. To wait, invoke `cursor-agent-bridge/scripts/wait_cursor_run.py` with the task's run-record path (or several paths for a parallel wave — one blocked call waits for the whole wave and exits with the first nonzero record code). Do not poll run state in a loop from the controller. Optional `--notify-command` on the runner provides external push (notification/webhook) after the record is written.
 
 ## Worktree boundaries
 
@@ -71,10 +75,11 @@ Cursor must **not** commit, push, merge, rebase, reset, tag, switch branches, or
 
 ## Bridge HEAD invariant and controller commits
 
-- The **bridge `HEAD` invariant** applies across **every Cursor invocation**. Any unexpected worker `HEAD` mutation stops the active task or wave.
-- After a task reaches **`approved-isolated`**, the controller may create **exactly the recorded task commit** on that task branch and must store the **task commit SHA** in the integration ledger before integration begins.
+- The **bridge `HEAD`/index invariant** applies across **every Cursor invocation**. Any unexpected worker `HEAD` mutation **or index mutation** (`git add`, `git stash`, `git reset`, or other staging changes, reported as `index_changed` in the run record) stops the active task or wave.
+- In **sequential mode**, after `reviewing-cursor-changes` returns `approved` for a task, the **controller commits** that task's changes in the integration worktree — bounded to the brief's allowed files and excluding `.superpowers/` execution artifacts — and records the **task commit SHA**. This commit is the baseline `head_before` for the next dispatch, keeping every task's diff attributable to that task.
+- After a task reaches **`approved-isolated`** in a parallel wave, the controller may create **exactly the recorded task commit** on that task branch and must store the **task commit SHA** in the integration ledger before integration begins.
 - After each sequential integration into the integration branch, record the **integrated HEAD** in the integration ledger.
-- **Unrecorded HEAD changes remain blockers.**
+- **Unrecorded HEAD or index changes remain blockers.** Controller commits recorded in the ledger are expected `HEAD` movement; the invariant governs Cursor invocations, not the controller.
 
 ## Task-brief schema
 
@@ -89,7 +94,37 @@ Write exactly one task brief at a time per active dispatch. Every brief must inc
 - **Report file path** and **report schema** (status, changes, tests, commands with exit codes, assumptions, git confirmation)
 - Instruction to stop and report a **blocker** when requirements conflict or required context is unavailable
 
-The controller writes the brief file before invoking the bridge. Cursor reads the brief path; the controller does not embed brief contents in shell commands.
+The controller writes the brief file before invoking the bridge. Cursor reads the brief path; the controller does not embed brief contents in shell commands. The brief's allowed-file scope must also be passed to the runner as repeated `--allowed-file` flags so scope becomes a code-level gate (exit `14` on violation), not only a review judgment.
+
+## Ledger tooling
+
+`scripts/ledger.py` manages the authoritative ledger so `progress.md` stays schema-clean across interruptions:
+
+```bash
+python3 scripts/ledger.py init progress.md --branch agent/<branch> --head <sha>
+python3 scripts/ledger.py set progress.md --task <id> --status approved --task-commit <sha> [--worktree <path> --artifact-root <path> --session <id> --brief <path> --report <path> --notes "..."]
+python3 scripts/ledger.py validate progress.md
+python3 scripts/ledger.py status progress.md
+python3 scripts/ledger.py coverage progress.md --plan plan.yaml
+```
+
+`validate` checks the header and every task entry against the ledger schema (all canonical fields present, status in the allowed set). `coverage` compares a machine-readable plan with ledger entries.
+
+## Machine-readable plan (optional but recommended)
+
+Keep `plan.yaml` next to the ledger when the approved plan is stable:
+
+```yaml
+tasks:
+  - id: task-1
+    title: Bounded task title
+    allowed_files: ["path/one.py", "dir/two/"]
+  - id: task-2
+    title: Next task
+    allowed_files: ["README.md"]
+```
+
+`ledger.py coverage progress.md --plan plan.yaml` fails when any plan `id` lacks a ledger entry — cheap proof that the plan and ledger cannot drift silently.
 
 ## Progress ledger format
 
@@ -115,7 +150,7 @@ Each task entry records:
 
 Update the integration ledger after every review decision and after every controller commit or integration step.
 
-In sequential mode, do not mark a task `approved` until `reviewing-cursor-changes` passes.
+In sequential mode, do not mark a task `approved` until `reviewing-cursor-changes` passes and the controller has committed the task's changes (excluding `.superpowers/` execution artifacts) and recorded the **task commit SHA**. The recorded SHA is the baseline `head_before` for the next dispatch.
 
 In parallel mode, mark `approved-isolated` after isolated review passes. **Integration may start only when every wave task is `approved-isolated`.** Do **not** integrate a subset when any task is `blocked`, `failed`, unresolved, or missing required artifacts. Mark `approved` only after the controller commits each task branch (recording **task commit SHA**), integrates sequentially in plan order (recording **integrated HEAD** after each step), reruns **affected verification after every integration**, and reruns the **full required suite at wave end**.
 
@@ -167,8 +202,14 @@ Stop the active loop and record the blocker in the **integration ledger** when:
 | Condition | Action |
 | --- | --- |
 | Cursor CLI or requested model unavailable | Stop; record blocker |
-| Bridge returns unexpected `HEAD` change or worker `HEAD` mutation | Stop; record blocker |
-| Unrecorded `HEAD` change on integration or task branch | Stop; record blocker |
+| Bridge returns unexpected `HEAD` or index change, or worker `HEAD`/index mutation (`head_changed` or `index_changed`) | Stop; record blocker |
+| Invalid runner input (missing/empty brief, colliding or non-regular artifact paths, exit `2`) | Fix inputs; do not dispatch |
+| Bridge run timed out (exit `13`) | Stop; inspect partial sidecars; record blocker or re-dispatch with a bounded scope |
+| Scope violation (exit `14`) | Stop; treat as out-of-scope changes; route a consolidated fix brief or record blocker |
+| Worker report `blocked`/`failed` (exit `15`/`16`) | Stop; read the report; resolve the blocker or record it |
+| Dispatch lock held (exit `17`) | Stop; another dispatch owns this workspace — serialize or clean a proven-stale lock |
+| `--expect-clean` refused (exit `18`) | Stop; workspace has uncommitted changes — attribute or commit before dispatch |
+| Unrecorded `HEAD` or index change on integration or task branch | Stop; record blocker |
 | Required report or artifact missing or empty despite exit `0` | Stop; record blocker |
 | Review returns `blocked` or requirements conflict | Stop; record blocker |
 | Out-of-scope changes cannot be resolved safely | Stop; record blocker |

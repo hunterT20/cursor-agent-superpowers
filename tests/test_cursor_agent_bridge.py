@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -10,11 +11,13 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUNNER = REPO_ROOT / "skills" / "cursor-agent-bridge" / "scripts" / "run_cursor_agent.py"
+WAITER = REPO_ROOT / "skills" / "cursor-agent-bridge" / "scripts" / "wait_cursor_run.py"
 FAKE_CURSOR = REPO_ROOT / "tests" / "fixtures" / "fake_cursor_agent.py"
 FIXED_MODEL = "composer-2.5[fast=false]"
 
@@ -39,8 +42,14 @@ class CursorAgentBridgeTests(unittest.TestCase):
         self,
         *,
         workspace: Path | None = None,
+        task_brief: Path | None = None,
+        report: Path | None = None,
+        run_record: Path | None = None,
+        stdout_file: Path | None = None,
+        stderr_file: Path | None = None,
         env: dict[str, str] | None = None,
         extra_args: list[str] | None = None,
+        test_hook: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         command = [
             sys.executable,
@@ -48,15 +57,15 @@ class CursorAgentBridgeTests(unittest.TestCase):
             "--workspace",
             str(workspace if workspace is not None else self.workspace),
             "--task-brief",
-            str(self.task_brief),
+            str(task_brief if task_brief is not None else self.task_brief),
             "--report",
-            str(self.report_file),
+            str(report if report is not None else self.report_file),
             "--run-record",
-            str(self.run_record),
+            str(run_record if run_record is not None else self.run_record),
             "--stdout-file",
-            str(self.stdout_file),
+            str(stdout_file if stdout_file is not None else self.stdout_file),
             "--stderr-file",
-            str(self.stderr_file),
+            str(stderr_file if stderr_file is not None else self.stderr_file),
             "--cursor-bin",
             sys.executable,
         ]
@@ -65,6 +74,10 @@ class CursorAgentBridgeTests(unittest.TestCase):
 
         run_env = os.environ.copy()
         run_env["FAKE_CURSOR_SCRIPT"] = str(FAKE_CURSOR)
+        if test_hook:
+            run_env["CURSOR_BRIDGE_TEST_HOOK"] = "1"
+        else:
+            run_env.pop("CURSOR_BRIDGE_TEST_HOOK", None)
         if env:
             run_env.update(env)
         return subprocess.run(
@@ -74,6 +87,33 @@ class CursorAgentBridgeTests(unittest.TestCase):
             env=run_env,
             check=False,
         )
+
+    def _init_git_repo(self, with_commit: bool = True) -> None:
+        subprocess.run(["git", "init"], cwd=self.workspace, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.com"],
+            cwd=self.workspace,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Bridge Test"],
+            cwd=self.workspace,
+            check=True,
+            capture_output=True,
+        )
+        if with_commit:
+            seed = self.workspace / "README.md"
+            seed.write_text("seed\n")
+            subprocess.run(
+                ["git", "add", "README.md"], cwd=self.workspace, check=True, capture_output=True
+            )
+            subprocess.run(
+                ["git", "commit", "-m", "seed"],
+                cwd=self.workspace,
+                check=True,
+                capture_output=True,
+            )
 
     def _load_record(self) -> dict:
         return json.loads(self.run_record.read_text())
@@ -182,6 +222,7 @@ class CursorAgentBridgeTests(unittest.TestCase):
         env.update(
             {
                 "FAKE_CURSOR_SCRIPT": str(FAKE_CURSOR),
+                "CURSOR_BRIDGE_TEST_HOOK": "1",
                 "FAKE_CURSOR_EXIT": "0",
                 "FAKE_CURSOR_WRITE_REPORT": "1",
                 "FAKE_CURSOR_MUTATE_HEAD": "0",
@@ -220,28 +261,7 @@ class CursorAgentBridgeTests(unittest.TestCase):
         self.assertEqual(record["exit_code"], 11)
 
     def test_detects_git_head_change_as_exit_12(self) -> None:
-        subprocess.run(["git", "init"], cwd=self.workspace, check=True, capture_output=True)
-        subprocess.run(
-            ["git", "config", "user.email", "test@example.com"],
-            cwd=self.workspace,
-            check=True,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["git", "config", "user.name", "Bridge Test"],
-            cwd=self.workspace,
-            check=True,
-            capture_output=True,
-        )
-        seed = self.workspace / "README.md"
-        seed.write_text("seed\n")
-        subprocess.run(["git", "add", "README.md"], cwd=self.workspace, check=True, capture_output=True)
-        subprocess.run(
-            ["git", "commit", "-m", "seed"],
-            cwd=self.workspace,
-            check=True,
-            capture_output=True,
-        )
+        self._init_git_repo()
 
         env = {
             "FAKE_CURSOR_EXIT": "0",
@@ -519,6 +539,323 @@ class CursorAgentBridgeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertTrue(self.task_brief.is_file())
         self.assertTrue(stat.S_ISREG(self.task_brief.stat().st_mode))
+
+    def test_rejects_directory_report_path(self) -> None:
+        report_dir = Path(self.temp_dir) / "report-dir"
+        report_dir.mkdir()
+        result = self._run_bridge(report=report_dir)
+        self.assertEqual(result.returncode, 2)
+        self.assertNotIn("Traceback", result.stderr)
+        record = self._load_record()
+        self.assertEqual(record["status"], "invalid_input")
+        self.assertEqual(record["exit_code"], 2)
+
+    def test_rejects_colliding_brief_and_report_paths(self) -> None:
+        result = self._run_bridge(report=self.task_brief)
+        self.assertEqual(result.returncode, 2)
+        self.assertTrue(self.task_brief.is_file(), "brief must not be deleted")
+        self.assertEqual(self.task_brief.stat().st_size, len("# Task\nDo the thing.\n"))
+        record = self._load_record()
+        self.assertEqual(record["status"], "invalid_input")
+        self.assertRegex(record["message"], r"(?i)distinct")
+
+    def test_rejects_colliding_sidecar_paths(self) -> None:
+        result = self._run_bridge(stdout_file=self.stderr_file)
+        self.assertEqual(result.returncode, 2)
+        record = self._load_record()
+        self.assertEqual(record["status"], "invalid_input")
+        self.assertRegex(record["message"], r"(?i)distinct")
+
+    def test_rejects_empty_task_brief(self) -> None:
+        self.task_brief.write_text("")
+        result = self._run_bridge()
+        self.assertEqual(result.returncode, 2)
+        record = self._load_record()
+        self.assertEqual(record["status"], "invalid_input")
+        self.assertRegex(record["message"], r"(?i)non-empty|empty")
+
+    def test_detects_head_appearing_as_git_mutation(self) -> None:
+        self._init_git_repo(with_commit=False)
+        env = {
+            "FAKE_CURSOR_EXIT": "0",
+            "FAKE_CURSOR_WRITE_REPORT": "1",
+            "FAKE_CURSOR_MUTATE_HEAD": "1",
+        }
+        result = self._run_bridge(env=env)
+        self.assertEqual(result.returncode, 12)
+        record = self._load_record()
+        self.assertEqual(record["status"], "head_changed")
+        self.assertIsNone(record["head_before"])
+        self.assertIsNotNone(record["head_after"])
+        self.assertTrue(record["head_changed"])
+
+    def test_detects_index_mutation_as_exit_12(self) -> None:
+        self._init_git_repo()
+        env = {
+            "FAKE_CURSOR_EXIT": "0",
+            "FAKE_CURSOR_WRITE_REPORT": "1",
+            "FAKE_CURSOR_MUTATE_HEAD": "0",
+            "FAKE_CURSOR_STAGE": "1",
+        }
+        result = self._run_bridge(env=env)
+        self.assertEqual(result.returncode, 12)
+        record = self._load_record()
+        self.assertEqual(record["status"], "index_changed")
+        self.assertFalse(record["head_changed"])
+        self.assertTrue(record["index_changed"])
+
+    def test_records_workspace_cwd_and_repo_fields(self) -> None:
+        self._init_git_repo()
+        env = {
+            "FAKE_CURSOR_EXIT": "0",
+            "FAKE_CURSOR_WRITE_REPORT": "1",
+            "FAKE_CURSOR_MUTATE_HEAD": "0",
+        }
+        result = self._run_bridge(env=env)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        record = self._load_record()
+        self.assertEqual(record["cursor_cwd"], str(self.workspace.resolve()))
+        self.assertEqual(record["controller_cwd"], str(Path.cwd().resolve()))
+        self.assertEqual(record["repo_root"], str(self.workspace.resolve()))
+        self.assertIsNotNone(record["cursor_version"])
+        self.assertTrue(record["test_hook"])
+        self.assertFalse(record["timed_out"])
+
+    def test_survives_non_utf8_stdout(self) -> None:
+        env = {
+            "FAKE_CURSOR_EXIT": "0",
+            "FAKE_CURSOR_WRITE_REPORT": "1",
+            "FAKE_CURSOR_MUTATE_HEAD": "0",
+            "FAKE_CURSOR_RAW_STDOUT": "fffe",
+        }
+        result = self._run_bridge(env=env)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertTrue(self.run_record.exists())
+        self.assertIn("\ufffd", self.stdout_file.read_text())
+
+    def test_times_out_long_running_worker(self) -> None:
+        env = {
+            "FAKE_CURSOR_EXIT": "0",
+            "FAKE_CURSOR_WRITE_REPORT": "1",
+            "FAKE_CURSOR_MUTATE_HEAD": "0",
+            "FAKE_CURSOR_SLEEP": "5",
+        }
+        result = self._run_bridge(env=env, extra_args=["--timeout", "1"])
+        self.assertEqual(result.returncode, 13)
+        record = self._load_record()
+        self.assertEqual(record["status"], "timed_out")
+        self.assertEqual(record["exit_code"], 13)
+        self.assertTrue(record["timed_out"])
+
+    def test_fake_script_ignored_without_test_hook(self) -> None:
+        result = self._run_bridge(test_hook=False)
+        record = self._load_record()
+        self.assertFalse(record["test_hook"])
+        command = record["command"]
+        self.assertNotIn(str(FAKE_CURSOR), command)
+        self.assertEqual(command[command.index(sys.executable) + 1], "--print")
+
+    def test_scope_violation_detected_as_exit_14(self) -> None:
+        self._init_git_repo()
+        env = {
+            "FAKE_CURSOR_EXIT": "0",
+            "FAKE_CURSOR_WRITE_REPORT": "1",
+            "FAKE_CURSOR_WRITE_FILE": "evil.txt::out-of-scope",
+        }
+        result = self._run_bridge(env=env, extra_args=["--allowed-file", "feat-a.txt"])
+        self.assertEqual(result.returncode, 14)
+        record = self._load_record()
+        self.assertEqual(record["status"], "scope_violation")
+        self.assertEqual(record["scope_check"], "failed")
+        self.assertEqual(record["scope_violated_files"], ["evil.txt"])
+
+    def test_scope_passes_when_changes_allowed(self) -> None:
+        self._init_git_repo()
+        env = {
+            "FAKE_CURSOR_EXIT": "0",
+            "FAKE_CURSOR_WRITE_REPORT": "1",
+            "FAKE_CURSOR_WRITE_FILE": "feat-a.txt::in-scope",
+        }
+        result = self._run_bridge(
+            env=env, extra_args=["--allowed-file", "feat-a.txt"]
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        record = self._load_record()
+        self.assertEqual(record["scope_check"], "passed")
+        self.assertEqual(record["changed_files"], ["feat-a.txt"])
+        self.assertEqual(record["worker_status"], "implemented")
+
+    def test_scope_directory_prefix_allows_children(self) -> None:
+        self._init_git_repo()
+        env = {
+            "FAKE_CURSOR_EXIT": "0",
+            "FAKE_CURSOR_WRITE_REPORT": "1",
+            "FAKE_CURSOR_WRITE_FILE": "src/x.py::code",
+        }
+        result = self._run_bridge(env=env, extra_args=["--allowed-file", "src/"])
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        record = self._load_record()
+        self.assertEqual(record["scope_check"], "passed")
+
+    def test_worker_blocked_maps_exit_15(self) -> None:
+        env = {
+            "FAKE_CURSOR_EXIT": "0",
+            "FAKE_CURSOR_WRITE_REPORT": "1",
+            "FAKE_CURSOR_REPORT_STATUS": "blocked",
+        }
+        result = self._run_bridge(env=env)
+        self.assertEqual(result.returncode, 15)
+        record = self._load_record()
+        self.assertEqual(record["status"], "worker_blocked")
+        self.assertEqual(record["worker_status"], "blocked")
+
+    def test_worker_failed_maps_exit_16(self) -> None:
+        env = {
+            "FAKE_CURSOR_EXIT": "0",
+            "FAKE_CURSOR_WRITE_REPORT": "1",
+            "FAKE_CURSOR_REPORT_STATUS": "failed",
+        }
+        result = self._run_bridge(env=env)
+        self.assertEqual(result.returncode, 16)
+        record = self._load_record()
+        self.assertEqual(record["status"], "worker_failed")
+        self.assertEqual(record["worker_status"], "failed")
+
+    def test_existing_lock_blocks_dispatch_as_exit_17(self) -> None:
+        digest = hashlib.sha256(
+            str(self.workspace.resolve()).encode("utf-8")
+        ).hexdigest()[:16]
+        lock_file = Path(tempfile.gettempdir()) / f"cursor-bridge-{digest}.lock"
+        self.addCleanup(lock_file.unlink, missing_ok=True)
+        lock_file.write_text('{"pid": 999999, "holder": "test"}\n')
+        result = self._run_bridge()
+        self.assertEqual(result.returncode, 17)
+        record = self._load_record()
+        self.assertEqual(record["status"], "dispatch_locked")
+        self.assertTrue(lock_file.exists(), "foreign lock must not be removed")
+
+    def test_lock_released_after_run(self) -> None:
+        digest = hashlib.sha256(
+            str(self.workspace.resolve()).encode("utf-8")
+        ).hexdigest()[:16]
+        lock_file = Path(tempfile.gettempdir()) / f"cursor-bridge-{digest}.lock"
+        env = {
+            "FAKE_CURSOR_EXIT": "0",
+            "FAKE_CURSOR_WRITE_REPORT": "1",
+        }
+        result = self._run_bridge(env=env)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertFalse(lock_file.exists(), "lock must be released after the run")
+
+    def test_expect_clean_rejects_dirty_workspace_as_exit_18(self) -> None:
+        self._init_git_repo()
+        (self.workspace / "dirty.txt").write_text("dirty\n")
+        result = self._run_bridge(extra_args=["--expect-clean"])
+        self.assertEqual(result.returncode, 18)
+        record = self._load_record()
+        self.assertEqual(record["status"], "dirty_workspace")
+
+    def test_expect_clean_allows_clean_workspace(self) -> None:
+        self._init_git_repo()
+        env = {
+            "FAKE_CURSOR_EXIT": "0",
+            "FAKE_CURSOR_WRITE_REPORT": "1",
+        }
+        result = self._run_bridge(env=env, extra_args=["--expect-clean"])
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+    def test_timeout_kills_whole_process_group(self) -> None:
+        marker = Path(self.temp_dir) / "child-survived.txt"
+        env = {
+            "FAKE_CURSOR_EXIT": "0",
+            "FAKE_CURSOR_SLEEP": "60",
+            "FAKE_CURSOR_SPAWN_CHILD": f"{marker}:2",
+        }
+        result = self._run_bridge(env=env, extra_args=["--timeout", "1"])
+        self.assertEqual(result.returncode, 13)
+        record = self._load_record()
+        self.assertEqual(record["status"], "timed_out")
+        time.sleep(3)
+        self.assertFalse(
+            marker.exists(),
+            "grandchild process survived the timeout; process-group kill failed",
+        )
+
+    def test_notify_command_runs_with_env(self) -> None:
+        marker = Path(self.temp_dir) / "notified.txt"
+        env = {
+            "FAKE_CURSOR_EXIT": "0",
+            "FAKE_CURSOR_WRITE_REPORT": "1",
+        }
+        result = self._run_bridge(
+            env=env,
+            extra_args=[
+                "--notify-command",
+                f'printf "%s" "$CURSOR_STATUS" > "{marker}"',
+            ],
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertEqual(marker.read_text(), "success")
+        record = self._load_record()
+        self.assertIn("CURSOR_STATUS", record["notify_command"])
+
+    def test_notify_failure_never_changes_exit_code(self) -> None:
+        env = {
+            "FAKE_CURSOR_EXIT": "0",
+            "FAKE_CURSOR_WRITE_REPORT": "1",
+        }
+        result = self._run_bridge(
+            env=env,
+            extra_args=["--notify-command", "exit 3"],
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+    def test_wait_returns_when_record_exists(self) -> None:
+        env = {
+            "FAKE_CURSOR_EXIT": "0",
+            "FAKE_CURSOR_WRITE_REPORT": "1",
+        }
+        result = self._run_bridge(env=env)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        wait = subprocess.run(
+            [
+                sys.executable,
+                str(WAITER),
+                str(self.run_record),
+                "--timeout",
+                "10",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(wait.returncode, 0, msg=wait.stderr)
+        self.assertIn("success", wait.stdout)
+
+    def test_wait_times_out_when_record_never_appears(self) -> None:
+        missing = Path(self.temp_dir) / "never.json"
+        wait = subprocess.run(
+            [sys.executable, str(WAITER), str(missing), "--timeout", "1"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(wait.returncode, 124)
+        self.assertIn("missing", wait.stdout)
+
+    def test_wait_propagates_first_failure(self) -> None:
+        good = Path(self.temp_dir) / "good.json"
+        bad = Path(self.temp_dir) / "bad.json"
+        good.write_text(json.dumps({"status": "success", "exit_code": 0}))
+        bad.write_text(json.dumps({"status": "head_changed", "exit_code": 12}))
+        wait = subprocess.run(
+            [sys.executable, str(WAITER), str(good), str(bad), "--timeout", "5"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(wait.returncode, 12)
 
 
 if __name__ == "__main__":

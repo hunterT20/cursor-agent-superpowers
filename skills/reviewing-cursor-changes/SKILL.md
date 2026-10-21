@@ -13,7 +13,7 @@ Collect before any verdict:
 
 - **Task brief** — scope, allowed files, acceptance criteria, verification commands.
 - **Worker report** — evidence supplied by Cursor, not proof of completion.
-- **Bridge run record** — `head_before`, `head_after`, `head_changed`, exit codes.
+- **Bridge run record** — `head_before`, `head_after`, `head_changed`, `index_changed`, `worker_status`, `scope_check`, `scope_violated_files`, `changed_files`, exit codes.
 - **Starting `HEAD`** — recorded before the task.
 - **Actual task-scoped diff** — from git, not the report file list alone.
 - **Test evidence** — exact command, exit code, and result/output for every required verification.
@@ -22,9 +22,9 @@ Missing any input → `fix-required` or `blocked`; never trust the report alone.
 
 ## Gate order
 
-1. **Check `HEAD` first.** Compare starting `HEAD`, run-record `head_before`/`head_after`, and current `HEAD`. Any unexpected `HEAD` mutation or `head_changed=true` → verdict `blocked`; stop and ask the user for direction. Do not approve or advance.
+1. **Check `HEAD` and index first.** Compare starting `HEAD`, run-record `head_before`/`head_after`, and current `HEAD`. Any unexpected `HEAD` or index mutation, `head_changed=true`, or `index_changed=true` → verdict `blocked`; stop and ask the user for direction. Do not approve or advance.
 2. Verify bridge run record and worker report exist.
-3. Inspect the actual diff and changed-file scope against the brief's allowed files.
+3. Inspect the actual diff and changed-file scope against the brief's allowed files. Cross-check the run record's `scope_check`/`scope_violated_files` and `worker_status` — a runner-reported `scope_violation`, `worker_blocked`, or `worker_failed` cannot become `approved` without explicit resolution evidence.
 4. Run evidence validation (commands, exit codes, outputs).
 5. Review spec-compliance and code-quality as two separate dimensions.
 6. Emit exactly one final verdict.

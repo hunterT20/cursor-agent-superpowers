@@ -66,7 +66,7 @@ In both routes, Cursor Agent remains the only semantic implementation and review
 | Creative or behavioral discovery | `superpowers:brainstorming` | Continue planning; no implementation yet |
 | Approved design needs a task plan | `superpowers:writing-plans` | Produce an approved plan only |
 | Git repo needs isolation | `superpowers:using-git-worktrees` | Isolate workspace before dispatch |
-| Approved plan ready to build | `executing-plans-with-cursor` | Sequential task dispatch through `cursor-agent-bridge` |
+| Approved plan ready to build | `executing-plans-with-cursor` | Sequential dispatch — or a controller-authorized parallel wave — through `cursor-agent-bridge` |
 | Task worker finished | `reviewing-cursor-changes` | Controller review; semantic fixes route back through `cursor-agent-bridge`; mechanical patches follow the narrow exception |
 | Full change set ready to ship | `superpowers:verification-before-completion` | Controller verification only |
 | Branch completion | `superpowers:finishing-a-development-branch` | Controller-only; Cursor never finishes the branch |
@@ -81,8 +81,9 @@ Every semantic implementation edit and every semantic review-fix edit routes thr
 - Load and follow upstream `superpowers:*` skills for discovery, planning, worktrees, verification, and branch finishing only after the user confirms.
 - Otherwise use controller-native planning, review, verification, worktree handling, and branch completion.
 - Write task briefs, review briefs, scope decisions, and pass/fail verdicts.
-- Inspect run records, reports, diffs, test output, and `HEAD` invariants after every Cursor invocation.
+- Inspect run records, reports, diffs, test output, and `HEAD`/index invariants after every Cursor invocation.
 - Apply mechanical review patches only under the allowlist in `reviewing-cursor-changes`; record controller-patch evidence and rerun exact covering verification.
+- Commit approved task changes (sequential task commits and parallel-wave task branch commits) and record the SHAs in the integration ledger.
 - Block or approve before the next task or final verification.
 
 ## Cursor-only actions
